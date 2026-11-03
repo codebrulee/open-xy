@@ -175,4 +175,16 @@ void extensions_scene_boundary(const extensions::SceneBoundary& boundary) {
         if (entries[i].hooks->scene_boundary) entries[i].hooks->scene_boundary(current, boundary);
     dispatching = false;
 }
+bool extensions_track_mute(const extensions::TrackMute& mute) {
+    if (dispatching) return false;
+    extensions_sync();
+    if (!entries) return false;
+    bool hold = false;
+    dispatching = true;
+    for (u32 i = 0; i < entry_count; ++i)
+        if (entries[i].hooks->track_mute &&
+            entries[i].hooks->track_mute(current, mute) == extensions::MuteTiming::next_boundary) hold = true;
+    dispatching = false;
+    return hold && current.playing && !mute.cancels_held;
+}
 }}

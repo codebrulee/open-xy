@@ -57,7 +57,7 @@ of its own beside it.
 | Access | Rule | Here |
 | --- | --- | --- |
 | Observe | Read-only; every subscriber, in collection order | Every event |
-| Transform | One ordered chain that may change or drop the event | None yet |
+| Transform | One ordered chain that may change or drop the event | `track_mute`: any subscriber can hold a mute until the next scene boundary |
 | Claim | One owner per build; a second claimant fails the build | `record_double_tap` |
 
 ### Thread and host
@@ -97,6 +97,7 @@ only for the callback. The SDK does not sandbox native code.
 | `input_activity` | Any live note input, accepted or not, on any track; for cancelling gestures | Live onset |
 | `queued_control` | A queued key (Record and the other queued controls; not keyboard keys 26–49) after stock handled it, with a microsecond time. `accepted`: stock took it as input (for Record, stock registered the press or release); `unmodified`: no other key or Shift held. Key numbers are in `keys` | Key queue |
 | `scene_boundary` | The playing scene's longest pattern ended and stock chose the next scene: the scene that ended and the one that starts, why (`kept`, `queued` or the active `song`), the song and, for a song, the entry that starts. Only while playing; stock's own song position has already moved on | Boundary step, its queued and song scene changes |
+| `track_mute` | A mute or unmute pressed (`keys`: Instrument or Aux + 1–8, or MIDI; `mixer`), playing or stopped, before stock applies it: the scene's mute slot (0–15) and whether it mutes. The answer `next_boundary` holds it while playing; the SDK applies held mutes after the next boundary, before `scene_boundary`, or when the transport stops. A press on a track with a held mute cancels it (`cancels_held`) | Mute's scene write and DSP message, the mixer's toggle |
 
 Project and pattern IDs are opaque equality tokens. Lengths use pattern ticks;
 scale 1 has 480 ticks per step. Stock's pickup gives negative positions near
@@ -133,7 +134,7 @@ SDK's claims and actions. Each extension's `extension.json` lists those it uses.
   Calls outside the callback, with a stale context, or a second write or
   popup in one callback are refused.
 
-Observers cannot transform notes or suppress stock input.
+Observers cannot transform notes or suppress stock input; `track_mute` may only delay a mute to the next scene boundary.
 
 ## Add an extension
 

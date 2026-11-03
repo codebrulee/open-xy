@@ -34,6 +34,8 @@ void extensions_selected_note_off(u32 track, u32 pitch);
 void extensions_recording_tick(u32 delta);
 void extensions_queued_control(const extensions::Control& control);
 void extensions_scene_boundary(const extensions::SceneBoundary& boundary);
+// Every subscriber sees the press; true when one asks to hold it and stock is playing.
+bool extensions_track_mute(const extensions::TrackMute& mute);
 
 // An instrument track's pattern, as notes are written to it.
 struct TrackPattern { u32 pattern, length, scale; bool editable; };

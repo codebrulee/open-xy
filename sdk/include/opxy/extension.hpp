@@ -42,6 +42,26 @@ struct SceneBoundary {
     // boundary ends, so read the entry here, not from a later event.
     u32 song, entry;
 };
+// A track's mute or unmute was pressed, before stock applies it. Mutes belong to
+// the current scene: stock writes them into it, and the next scene switch loads
+// that scene's own mutes.
+enum class MuteSource : u8 {
+    keys,   // Instrument or Aux + 1-8, or MIDI
+    mixer,  // the mixer page
+};
+struct TrackMute {
+    u32 track;  // the scene's mute slot, 0-15
+    bool muted;  // what the press asks for
+    MuteSource source;
+    // A mute is already held for this track: this press cancels it, nothing
+    // changes, and the subscribers' answers are ignored.
+    bool cancels_held;
+};
+// A track_mute subscriber's answer. While playing, the SDK holds the mute if any
+// subscriber asks: it applies it after the next scene boundary, before that
+// boundary's event, or at once when the transport stops. Stopped, mutes always
+// apply at once.
+enum class MuteTiming : u8 { now, next_boundary };
 // Key numbers as stock reports them in queued controls.
 namespace keys { const u32 record = 50; }
 struct Control {
@@ -77,6 +97,7 @@ using OnRecordingTick = void (*)(const Context&, const Tick&);
 using OnInputActivity = void (*)();
 using OnQueuedControl = void (*)(const Context&, const Control&, const Actions&);
 using OnSceneBoundary = void (*)(const Context&, const SceneBoundary&);
+using OnTrackMute = MuteTiming (*)(const Context&, const TrackMute&);
 
 // One callback per event, named for what it delivers. Each event lists its
 // firmware sites in the profile ("events"); docs/extensions.md says how to
@@ -87,7 +108,8 @@ using OnSceneBoundary = void (*)(const Context&, const SceneBoundary&);
 //
 // All callbacks are synchronous on the controller path, in collection order.
 // Arguments are borrowed for the callback. No allocation, blocking or I/O.
-// Observers cannot transform live input or consume stock controls.
+// Observers cannot transform live input or consume stock controls; track_mute
+// is the one transform, and only delays a mute.
 struct Hooks {
     // Selected-track recording context and play state; before every other event.
     OnContext context;
@@ -106,34 +128,41 @@ struct Hooks {
     OnQueuedControl queued_control;
     // A scene boundary while playing, after stock chose the next scene.
     OnSceneBoundary scene_boundary;
+    // A mute or unmute pressed, playing or not; the only transform: its answer
+    // can hold the mute until the next scene boundary.
+    OnTrackMute track_mute;
 
-    constexpr Hooks() : Hooks(nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr) {}
+    constexpr Hooks() : Hooks(nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr) {}
     // Every callback in order; prefer the with_ builders below.
     constexpr Hooks(OnContext a, OnRecordableNoteOn b, OnSelectedNoteOff c, OnRecordingTick d,
-                    OnInputActivity e, OnQueuedControl f, OnSceneBoundary g)
+                    OnInputActivity e, OnQueuedControl f, OnSceneBoundary g, OnTrackMute h)
         : context(a), recordable_note_on(b), selected_note_off(c), recording_tick(d),
-          input_activity(e), queued_control(f), scene_boundary(g) {}
+          input_activity(e), queued_control(f), scene_boundary(g), track_mute(h) {}
 
     constexpr Hooks with_context(OnContext f) const {
-        return Hooks(f, recordable_note_on, selected_note_off, recording_tick, input_activity, queued_control, scene_boundary);
+        return Hooks(f, recordable_note_on, selected_note_off, recording_tick, input_activity, queued_control, scene_boundary, track_mute);
     }
     constexpr Hooks with_recordable_note_on(OnRecordableNoteOn f) const {
-        return Hooks(context, f, selected_note_off, recording_tick, input_activity, queued_control, scene_boundary);
+        return Hooks(context, f, selected_note_off, recording_tick, input_activity, queued_control, scene_boundary, track_mute);
     }
     constexpr Hooks with_selected_note_off(OnSelectedNoteOff f) const {
-        return Hooks(context, recordable_note_on, f, recording_tick, input_activity, queued_control, scene_boundary);
+        return Hooks(context, recordable_note_on, f, recording_tick, input_activity, queued_control, scene_boundary, track_mute);
     }
     constexpr Hooks with_recording_tick(OnRecordingTick f) const {
-        return Hooks(context, recordable_note_on, selected_note_off, f, input_activity, queued_control, scene_boundary);
+        return Hooks(context, recordable_note_on, selected_note_off, f, input_activity, queued_control, scene_boundary, track_mute);
     }
     constexpr Hooks with_input_activity(OnInputActivity f) const {
-        return Hooks(context, recordable_note_on, selected_note_off, recording_tick, f, queued_control, scene_boundary);
+        return Hooks(context, recordable_note_on, selected_note_off, recording_tick, f, queued_control, scene_boundary, track_mute);
     }
     constexpr Hooks with_queued_control(OnQueuedControl f) const {
-        return Hooks(context, recordable_note_on, selected_note_off, recording_tick, input_activity, f, scene_boundary);
+        return Hooks(context, recordable_note_on, selected_note_off, recording_tick, input_activity, f, scene_boundary, track_mute);
     }
     constexpr Hooks with_scene_boundary(OnSceneBoundary f) const {
-        return Hooks(context, recordable_note_on, selected_note_off, recording_tick, input_activity, queued_control, f);
+        return Hooks(context, recordable_note_on, selected_note_off, recording_tick, input_activity, queued_control, f, track_mute);
+    }
+    constexpr Hooks with_track_mute(OnTrackMute f) const {
+        return Hooks(context, recordable_note_on, selected_note_off, recording_tick, input_activity, queued_control,
+                     scene_boundary, f);
     }
 };
 }}

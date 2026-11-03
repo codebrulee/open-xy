@@ -121,6 +121,16 @@ u32 boundary_step(u32 controller) {
     }
     return 5;
 }
+// Mutes: stock's scene write and DSP message, and its mute 8d5934fc, which calls
+// both through the hooked sites as stock does.
+u32 scene_mutes[16], dsp_mutes[16], scene_mute_calls = 0, dsp_mute_calls = 0;
+u32 scene_mute(u32 t, u32 v) { failed |= t >= 16; scene_mutes[t] = v; ++scene_mute_calls; return 1; }
+u32 dsp_mute(u32 t, u32 v) { failed |= t >= 16; dsp_mutes[t] = v; ++dsp_mute_calls; return 0; }
+void sequencer_mute(u32 controller, u32 t, u32 v) {
+    failed |= controller != 0x860c6adc;
+    sdk_extensions_mute_keys(t, v);
+    sdk_extensions_mute_dsp(t, v);
+}
 void key(u32 key, bool pressed, u32 elapsed=50000) {
     clock_time += elapsed;
     const u32 event[4]={key, pressed ? 100u : 0u, 123, 456};
@@ -174,6 +184,9 @@ Address host_stock_address(Address address) {
         case 0x8d5857ac: return reinterpret_cast<Address>(&set_scene);
         case 0x8d5842cc: return reinterpret_cast<Address>(&get_scene);
         case 0x8d58426c: return reinterpret_cast<Address>(&get_song);
+        case 0x8d585394: return reinterpret_cast<Address>(&scene_mute);
+        case 0x8d4dc8d2: return reinterpret_cast<Address>(&dsp_mute);
+        case 0x8d5934fc: return reinterpret_cast<Address>(&sequencer_mute);
         case 0x860c9b40: return reinterpret_cast<Address>(&song_position);
     }
     static const u32 ratios[32]={3,1,2,1,4,3,1,1,3,4,1,2,1,3,1,4,1,5,1,6,1,7,1,8,1,9,1,12,1,16,1,32};
@@ -185,6 +198,7 @@ Address host_stock_address(Address address) {
 using extensions::probe::seen;
 using extensions::probe::command;
 using extensions::probe::written;
+using extensions::probe::mute_answer;
 
 int main() {
     fill_pattern(0);
@@ -275,6 +289,34 @@ int main() {
     CHECK(sdk_extensions_scene_queued(6,0)==7 && scene_now==6 && seen.boundaries==3);
     CHECK(sdk_extensions_scene_song(7,0)==7 && scene_now==7 && seen.boundaries==3);
 
+    // Mutes: every press reaches track_mute first. Answered now, stock acts at once.
+    using extensions::MuteSource;
+    using extensions::MuteTiming;
+    song_now=16;
+    sequencer_mute(0x860c6adc,3,2);
+    CHECK(seen.mutes==1 && seen.mute.track==3 && seen.mute.muted && seen.mute.source==MuteSource::keys);
+    CHECK(!seen.mute.cancels_held && scene_mutes[3]==2 && dsp_mutes[3]==2 && scene_mute_calls==1 && dsp_mute_calls==1);
+    // Held while playing: stock does nothing until the boundary, then applies it
+    // through its own mute, before the boundary's event and without a second event.
+    mute_answer=MuteTiming::next_boundary;
+    sequencer_mute(0x860c6adc,3,0);
+    CHECK(seen.mutes==2 && !seen.mute.muted && scene_mutes[3]==2 && scene_mute_calls==1 && dsp_mute_calls==1);
+    CHECK(sdk_extensions_mute_mixer(9,2)==1 && seen.mutes==3 && seen.mute.source==MuteSource::mixer && scene_mute_calls==1);
+    sdk_extensions_scene_boundary(0x860c6adc);
+    CHECK(seen.mutes==3 && seen.boundaries==4 && scene_mutes[3]==0 && dsp_mutes[3]==0 && scene_mutes[9]==2);
+    CHECK(scene_mute_calls==3 && dsp_mute_calls==3);
+    // A second press before the boundary cancels the held mute.
+    sdk_extensions_mute_mixer(5,2); sdk_extensions_mute_mixer(5,2);
+    CHECK(seen.mutes==5 && seen.mute.cancels_held && scene_mute_calls==3);
+    sdk_extensions_scene_boundary(0x860c6adc); CHECK(scene_mute_calls==3 && scene_mutes[5]==0);
+    // Stop applies a held mute at once, and so does any update that finds the transport stopped.
+    sequencer_mute(0x860c6adc,6,2); CHECK(scene_mute_calls==3);
+    playing=counting=0; sdk_extensions_stop(0x860c6adc); CHECK(scene_mutes[6]==2 && dsp_mutes[6]==2 && scene_mute_calls==4);
+    play(); sdk_extensions_mute_mixer(7,2); CHECK(scene_mute_calls==4);
+    playing=counting=0; sdk_extensions_controller_update(0x860c6adc,17); CHECK(scene_mutes[7]==2 && scene_mute_calls==5);
+    // Stopped, an answer to hold is ignored.
+    sequencer_mute(0x860c6adc,2,2); CHECK(scene_mutes[2]==2 && scene_mute_calls==6);
+    mute_answer=MuteTiming::now;
 
     CHECK(!failed);
     return 0;

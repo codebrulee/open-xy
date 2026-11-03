@@ -94,7 +94,7 @@ class Extensions(unittest.TestCase):
         extensions.check_profile(profile)
         self.assertEqual(extensions.events(), ['context', 'recordable_note_on', 'selected_note_off',
                                                'recording_tick', 'input_activity', 'queued_control',
-                                               'scene_boundary'])
+                                               'scene_boundary', 'track_mute'])
         hook = lambda p: next(x for x in p['patches'] if x.get('events'))
         for mutate in (
             lambda p: hook(p).pop('events'),

@@ -47,7 +47,7 @@ version is rejected. The output differs from stock in exactly these places:
 | Aux tracks | 13 | Lets a track control machine take over aux track 12 (CV): its chooser on Shift + M1 (the effect list on the sends), its presets on Shift + track key, its page on M1, its parameter names on the LFO's destinations, its own LFO whichever track is selected, and CV and gate kept silent; four MTP allowlist edits show the user's aux presets |
 | Preset scan | 1 | Hides factory presets whose engine the build does not install ([presets](#presets)) |
 | Startup label | 1 | Shows `OPEN <version>-1.2.1` at boot, `<version>` from [`VERSION`](../VERSION), through the stock startup text renderer |
-| Extension events | 10 | Observes live input, stock transport, queued controls and scene boundaries for extensions, and lets a Record double-tap owner edit notes through stock editing and undo; linked only when an extension is selected |
+| Extension events | 13 | Observes live input, stock transport, queued controls, scene boundaries and mutes for extensions, can hold a mute until the next scene boundary, and lets a Record double-tap owner edit notes through stock editing and undo; linked only when an extension is selected |
 | Module | 1 record | One loader block holding the linked module |
 
 The sample rows (sample dispatch, analysis, drum-page services and recorder)
@@ -168,10 +168,10 @@ named for the stock calls they replace; they are adapter entry points, not
 extension APIs. Capture ([open-xy-core-machines](https://github.com/etcetc000/open-xy-core-machines/tree/main/extensions/capture)) is the first
 subscriber: it owns the bounded current-track ghost pattern and the Record gesture.
 
-The ten hooks replace the controller-update call at `0x8c0baaf0`, queued key
+The thirteen hooks replace the controller-update call at `0x8c0baaf0`, queued key
 dispatch at `0x8c0b6184`, normalized live onset/release at `0x8d594376` and
 `0x8d59420a`, accepted-note bookkeeping at `0x8d595844`, recorder tick at
-`0x8d59819c`, Stop cleanup at `0x8d597db8`, and three for scene boundaries.
+`0x8d59819c`, Stop cleanup at `0x8d597db8`, three for scene boundaries and three for mutes.
 
 The scene boundary hook replaces the call to the sequencer's boundary step
 `0x8d597e10` at `0x8d598548`, inside the controller update. Stock calls it once
@@ -185,6 +185,18 @@ the step returns. Scene and song come from stock's getters `0x8d5842cc` (project
 `+6`) and `0x8d58426c` (project `+7`; bit 4 set means no song). Play start runs the
 same step from `0x8d597fb8` and `0x8d598ac6`, which are not hooked: a subscriber
 learns the opening scene as the first boundary's `previous`.
+
+Mutes live in the current scene: 16 bytes after its 16 pattern numbers, 2 for
+muted. Stock's mute `0x8d5934fc(controller, track, value)`, reached by the track
+keys and MIDI, writes the byte through `0x8d585394(track, value)` (hooked at
+`0x8d59350c`) and then tells the DSP board through `0x8d4dc8d2(track, value)`
+(`0x8d593514`); the mixer's toggle calls `0x8d585394` directly (`0x8c093a60`);
+how its mute then reaches the DSP board is not traced. A held mute skips both calls; the SDK applies it
+later through `0x8d5934fc`, after the boundary step and before the boundary's
+event, from the Stop hook, or from the controller update once stock is no longer
+playing. Its own call passes through the hooks without an event. Verified on
+hardware with a probe of the same sites: key and mixer mutes held to the
+boundary, cancelled by a second press, applied at Stop.
 The controller-update call follows the GUI tick call in the same main loop;
 they are separate sites. The Stop hook observes a stop/restart pair within one controller update. The key
 span also replaces the following queue-address load; its wrapper returns that

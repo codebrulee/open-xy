@@ -19,6 +19,9 @@ void sdk_extensions_live_note_off(opxy::u32, opxy::u32, opxy::u32, opxy::u32, op
 opxy::u32 sdk_extensions_scene_boundary(opxy::u32) __asm__("sdk_extensions_scene_boundary");
 opxy::u32 sdk_extensions_scene_queued(opxy::u32, opxy::u32) __asm__("sdk_extensions_scene_queued");
 opxy::u32 sdk_extensions_scene_song(opxy::u32, opxy::u32) __asm__("sdk_extensions_scene_song");
+opxy::u32 sdk_extensions_mute_keys(opxy::u32, opxy::u32) __asm__("sdk_extensions_mute_keys");
+opxy::u32 sdk_extensions_mute_dsp(opxy::u32, opxy::u32) __asm__("sdk_extensions_mute_dsp");
+opxy::u32 sdk_extensions_mute_mixer(opxy::u32, opxy::u32) __asm__("sdk_extensions_mute_mixer");
 }
 
 namespace opxy { namespace platform {
@@ -137,10 +140,44 @@ void extension_notify(const char* text) {
 using namespace opxy;
 using namespace opxy::platform;
 
+// Mutes a track_mute subscriber held: applied after the next scene boundary,
+// or once the transport has stopped, through stock's own mute 8d5934fc
+// (controller, track, value), which writes the scene and tells the DSP board.
+namespace {
+struct HeldMute { bool set; u32 value; };
+HeldMute held_mutes[16];
+bool applying_mutes, skip_dsp_mute;
+bool stock_playing() { return byte(kPlaying) || byte(kPlaying + 1); }
+void apply_held_mutes() {
+    applying_mutes = true;
+    for (u32 track = 0; track < 16; ++track) {
+        if (!held_mutes[track].set) continue;
+        held_mutes[track].set = false;
+        stock<void(u32, u32, u32)>(0x8d5934fc)(kController, track, held_mutes[track].value);
+    }
+    applying_mutes = false;
+}
+// True when the press is held or cancels a held one, so stock must not act on it.
+bool mute_pressed(u32 track, u32 value, extensions::MuteSource source) {
+    if (applying_mutes || track >= 16) return false;
+    const bool held = held_mutes[track].set;
+    const extensions::TrackMute mute = {track, value != 0, source, held};
+    const bool hold = extensions_track_mute(mute);
+    if (held) {
+        held_mutes[track].set = false;
+        return true;
+    }
+    if (!hold) return false;
+    held_mutes[track] = {true, value};
+    return true;
+}
+}
+
 void sdk_extensions_controller_update(u32 controller, u32 elapsed) {
     extensions_sync();
     stock<void(u32, u32)>(0x8d5986b8)(controller, elapsed);
     extensions_sync();
+    if (!stock_playing()) apply_held_mutes();  // however the transport stopped
 }
 void sdk_extensions_recorder_tick(u32 state, u32 delta) {
     extensions_recording_tick(delta);
@@ -148,6 +185,7 @@ void sdk_extensions_recorder_tick(u32 state, u32 delta) {
 }
 void sdk_extensions_stop(u32 controller) {
     stock<void(u32)>(0x8d591964)(controller);
+    apply_held_mutes();
     // Observe Stop even when an external Stop/Start pair arrives in one update.
     // Both stock playing flags are already clear at this call site.
     extensions_sync();
@@ -212,6 +250,7 @@ u32 sdk_extensions_scene_boundary(u32 controller) {
     boundary.scene = extension_scene();
     boundary.song = extension_song();
     if (boundary.cause != extensions::SceneCause::song) boundary.entry = 0;
+    apply_held_mutes();  // onto the scene that starts, before its event
     extensions_scene_boundary(boundary);
     return result;
 }
@@ -227,4 +266,25 @@ u32 sdk_extensions_scene_song(u32 scene, u32 copy) {
         boundary.entry = word(kSongPosition);
     }
     return stock<u32(u32, u32)>(0x8d5857ac)(scene, copy);
+}
+
+// Mutes. 8d5934fc(controller, track, value), reached by the track keys and MIDI,
+// writes the current scene's mute byte through 8d585394(track, value) (8d59350c),
+// then the DSP board's through 8d4dc8d2(track, value) (8d593514). The mixer's
+// toggle calls 8d585394 directly (8c093a60). Value 2 is muted, 0 unmuted.
+u32 sdk_extensions_mute_keys(u32 track, u32 value) {
+    skip_dsp_mute = mute_pressed(track, value, extensions::MuteSource::keys);
+    if (skip_dsp_mute) return 1;
+    return stock<u32(u32, u32)>(0x8d585394)(track, value);
+}
+u32 sdk_extensions_mute_dsp(u32 track, u32 value) {
+    if (skip_dsp_mute) {
+        skip_dsp_mute = false;
+        return 0;
+    }
+    return stock<u32(u32, u32)>(0x8d4dc8d2)(track, value);
+}
+u32 sdk_extensions_mute_mixer(u32 track, u32 value) {
+    if (mute_pressed(track, value, extensions::MuteSource::mixer)) return 1;
+    return stock<u32(u32, u32)>(0x8d585394)(track, value);
 }

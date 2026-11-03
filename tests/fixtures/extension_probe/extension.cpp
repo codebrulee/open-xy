@@ -4,17 +4,20 @@
 // reads what it saw. It is a test fixture, not a shipped extension.
 namespace opxy { namespace extensions { namespace probe {
 struct Seen {
-    u32 contexts, notes_on, notes_off, ticks, activity, controls, boundaries;
+    u32 contexts, notes_on, notes_off, ticks, activity, controls, boundaries, mutes;
     Context context;
     LiveNote note;
     NoteOff off;
     Tick tick;
     Control control;
     SceneBoundary boundary;
+    TrackMute mute;
 };
 Seen seen;
 // What an accepted Record release does: 0 nothing, 1 replace, 2 insert, 3 replace track 3.
 u32 command, written;
+// The probe's answer to every track_mute.
+MuteTiming mute_answer = MuteTiming::now;
 const Note take[2] = {{-12, 40, 60, 90}, {480, 60, 64, 100}};
 
 namespace {
@@ -24,6 +27,7 @@ void selected_note_off(const Context&, const NoteOff& n) { ++seen.notes_off; see
 void recording_tick(const Context&, const Tick& t) { ++seen.ticks; seen.tick = t; }
 void input_activity() { ++seen.activity; }
 void scene_boundary(const Context&, const SceneBoundary& b) { ++seen.boundaries; seen.boundary = b; }
+MuteTiming track_mute(const Context&, const TrackMute& m) { ++seen.mutes; seen.mute = m; return mute_answer; }
 void queued_control(const Context& c, const Control& k, const Actions& actions) {
     ++seen.controls;
     seen.control = k;
@@ -40,5 +44,6 @@ extern constexpr Hooks hooks = Hooks()
     .with_recording_tick(recording_tick)
     .with_input_activity(input_activity)
     .with_queued_control(queued_control)
-    .with_scene_boundary(scene_boundary);
+    .with_scene_boundary(scene_boundary)
+    .with_track_mute(track_mute);
 }}}
