@@ -15,7 +15,7 @@ EFFECT = None
 
 
 # A timer around the effect and the processor: void entry(u32 start, u32 end), CYCLES.
-TIMER = None
+TIMER = ('cpu_meter', 'sdk_cpu_aux_time')  # the cpu meter
 
 
 def render(units, effect=None, timer=None):
