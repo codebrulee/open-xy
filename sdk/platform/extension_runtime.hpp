@@ -33,6 +33,7 @@ void extensions_recordable_note_on(u32 track, u32 pitch, u32 velocity);
 void extensions_selected_note_off(u32 track, u32 pitch);
 void extensions_recording_tick(u32 delta);
 void extensions_queued_control(const extensions::Control& control);
+void extensions_scene_boundary(const extensions::SceneBoundary& boundary);
 
 // An instrument track's pattern, as notes are written to it.
 struct TrackPattern { u32 pattern, length, scale; bool editable; };
@@ -44,4 +45,8 @@ i32 extension_collision_radius(u32 track);
 bool extension_record_held();
 u32 extension_write(u32 track, const RecordedNote* notes, u32 count, bool replace);
 void extension_notify(const char* text);
+// The scene and active song as stock holds them now: scene 0-98, song 0-13 or
+// extensions::no_song.
+u32 extension_scene();
+u32 extension_song();
 }}

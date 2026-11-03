@@ -36,6 +36,7 @@ Three layers, kept apart:
 | --- | --- | --- |
 | Input | A key or MIDI note arrives, before recording and the sequencer | `recordable_note_on` and `selected_note_off` (selected track only); `input_activity` (any track, but without the note) |
 | Sequencer | A pattern step plays | Not exposed |
+| Scene | The playing scene's longest pattern ends | `scene_boundary`, while playing, after stock chose the next scene |
 | Track | Live and sequenced notes reach a track, before its instrument | Not exposed |
 | Voice | The instrument starts a voice | A machine's voice callbacks |
 
@@ -95,6 +96,7 @@ only for the callback. The SDK does not sandbox native code.
 | `recording_tick` | The selected track's scaled Q8 recording time, while playing and recordable; a discontinuity asks the subscriber to discard timing | Recorder tick |
 | `input_activity` | Any live note input, accepted or not, on any track; for cancelling gestures | Live onset |
 | `queued_control` | A queued key (Record and the other queued controls; not keyboard keys 26–49) after stock handled it, with a microsecond time. `accepted`: stock took it as input (for Record, stock registered the press or release); `unmodified`: no other key or Shift held. Key numbers are in `keys` | Key queue |
+| `scene_boundary` | The playing scene's longest pattern ended and stock chose the next scene: the scene that ended and the one that starts, why (`kept`, `queued` or the active `song`), the song and, for a song, the entry that starts. Only while playing; stock's own song position has already moved on | Boundary step, its queued and song scene changes |
 
 Project and pattern IDs are opaque equality tokens. Lengths use pattern ticks;
 scale 1 has 480 ticks per step. Stock's pickup gives negative positions near

@@ -166,4 +166,13 @@ void extensions_queued_control(const extensions::Control& control) {
     }
     dispatching = false;
 }
+void extensions_scene_boundary(const extensions::SceneBoundary& boundary) {
+    if (dispatching) return;
+    extensions_sync();
+    if (!entries || !current.playing) return;
+    dispatching = true;
+    for (u32 i = 0; i < entry_count; ++i)
+        if (entries[i].hooks->scene_boundary) entries[i].hooks->scene_boundary(current, boundary);
+    dispatching = false;
+}
 }}

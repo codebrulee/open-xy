@@ -26,6 +26,22 @@ struct LiveNote { u32 track, pitch, velocity; i32 position; u32 collision_radius
 struct NoteOff { u32 track, pitch; };
 struct Tick { u32 delta_q8; bool discontinuity; };
 using Time = __UINT64_TYPE__;
+// The current scene's longest pattern ended while playing, and stock chose the
+// scene that plays next. Scenes, songs and song entries count from 0.
+enum class SceneCause : u8 {
+    kept,    // no song and nothing queued: the same scene plays again
+    queued,  // a scene picked while playing (scene screen or MIDI) takes over
+    song,    // the active song's next entry
+};
+const u32 no_song = 0xffffffffu;
+struct SceneBoundary {
+    u32 previous, scene;  // the scene that ended, and the one that starts
+    SceneCause cause;
+    // The active song and, for cause song, the entry that starts; otherwise
+    // no_song and 0. Stock moves its own song position on before the
+    // boundary ends, so read the entry here, not from a later event.
+    u32 song, entry;
+};
 // Key numbers as stock reports them in queued controls.
 namespace keys { const u32 record = 50; }
 struct Control {
@@ -60,6 +76,7 @@ using OnSelectedNoteOff = void (*)(const Context&, const NoteOff&);
 using OnRecordingTick = void (*)(const Context&, const Tick&);
 using OnInputActivity = void (*)();
 using OnQueuedControl = void (*)(const Context&, const Control&, const Actions&);
+using OnSceneBoundary = void (*)(const Context&, const SceneBoundary&);
 
 // One callback per event, named for what it delivers. Each event lists its
 // firmware sites in the profile ("events"); docs/extensions.md says how to
@@ -87,31 +104,36 @@ struct Hooks {
     // A queued control (Record and other queued keys; not keyboard keys
     // 26-49) after stock handled it. Actions act only for their claim owner.
     OnQueuedControl queued_control;
+    // A scene boundary while playing, after stock chose the next scene.
+    OnSceneBoundary scene_boundary;
 
-    constexpr Hooks() : Hooks(nullptr, nullptr, nullptr, nullptr, nullptr, nullptr) {}
+    constexpr Hooks() : Hooks(nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr) {}
     // Every callback in order; prefer the with_ builders below.
     constexpr Hooks(OnContext a, OnRecordableNoteOn b, OnSelectedNoteOff c, OnRecordingTick d,
-                    OnInputActivity e, OnQueuedControl f)
+                    OnInputActivity e, OnQueuedControl f, OnSceneBoundary g)
         : context(a), recordable_note_on(b), selected_note_off(c), recording_tick(d),
-          input_activity(e), queued_control(f) {}
+          input_activity(e), queued_control(f), scene_boundary(g) {}
 
     constexpr Hooks with_context(OnContext f) const {
-        return Hooks(f, recordable_note_on, selected_note_off, recording_tick, input_activity, queued_control);
+        return Hooks(f, recordable_note_on, selected_note_off, recording_tick, input_activity, queued_control, scene_boundary);
     }
     constexpr Hooks with_recordable_note_on(OnRecordableNoteOn f) const {
-        return Hooks(context, f, selected_note_off, recording_tick, input_activity, queued_control);
+        return Hooks(context, f, selected_note_off, recording_tick, input_activity, queued_control, scene_boundary);
     }
     constexpr Hooks with_selected_note_off(OnSelectedNoteOff f) const {
-        return Hooks(context, recordable_note_on, f, recording_tick, input_activity, queued_control);
+        return Hooks(context, recordable_note_on, f, recording_tick, input_activity, queued_control, scene_boundary);
     }
     constexpr Hooks with_recording_tick(OnRecordingTick f) const {
-        return Hooks(context, recordable_note_on, selected_note_off, f, input_activity, queued_control);
+        return Hooks(context, recordable_note_on, selected_note_off, f, input_activity, queued_control, scene_boundary);
     }
     constexpr Hooks with_input_activity(OnInputActivity f) const {
-        return Hooks(context, recordable_note_on, selected_note_off, recording_tick, f, queued_control);
+        return Hooks(context, recordable_note_on, selected_note_off, recording_tick, f, queued_control, scene_boundary);
     }
     constexpr Hooks with_queued_control(OnQueuedControl f) const {
-        return Hooks(context, recordable_note_on, selected_note_off, recording_tick, input_activity, f);
+        return Hooks(context, recordable_note_on, selected_note_off, recording_tick, input_activity, f, scene_boundary);
+    }
+    constexpr Hooks with_scene_boundary(OnSceneBoundary f) const {
+        return Hooks(context, recordable_note_on, selected_note_off, recording_tick, input_activity, queued_control, f);
     }
 };
 }}

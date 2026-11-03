@@ -102,6 +102,25 @@ void popup(const char* text,u32 a,u32 b,u32 duration) {
     for (u32 i=0;i<sizeof(expected);++i) failed |= text[i]!=expected[i];
     failed |= a!=1 || b || duration!=0x3f000000u; ++popups;
 }
+// Scenes and songs: stock's boundary step applies the queued scene, or else the
+// active song's next entry, each through set-scene at its own (hooked) call.
+u32 scene_now = 0, song_now = 16, song_position = 0, queued_scene = ~0u, set_calls = 0, step_calls = 0;
+const u32 song_scenes[8] = {5, 6, 7, 8, 9, 10, 11, 12};
+u32 set_scene(u32 scene, u32) { scene_now = scene; ++set_calls; return 7; }
+u32 get_scene() { return scene_now; }
+u32 get_song() { return song_now; }
+u32 boundary_step(u32 controller) {
+    failed |= controller != 0x860c6adc;
+    ++step_calls;
+    if (queued_scene != ~0u) {
+        failed |= sdk_extensions_scene_queued(queued_scene, 1) != 7;
+        queued_scene = ~0u;
+    } else if (!(song_now & 16)) {
+        failed |= sdk_extensions_scene_song(song_scenes[song_position], 0) != 7;
+        ++song_position;
+    }
+    return 5;
+}
 void key(u32 key, bool pressed, u32 elapsed=50000) {
     clock_time += elapsed;
     const u32 event[4]={key, pressed ? 100u : 0u, 123, 456};
@@ -151,6 +170,11 @@ Address host_stock_address(Address address) {
         case 0x8d58f24c: return reinterpret_cast<Address>(&insert);
         case 0x8d587668: return reinterpret_cast<Address>(&publish);
         case 0x8d549168: return reinterpret_cast<Address>(&popup);
+        case 0x8d597e10: return reinterpret_cast<Address>(&boundary_step);
+        case 0x8d5857ac: return reinterpret_cast<Address>(&set_scene);
+        case 0x8d5842cc: return reinterpret_cast<Address>(&get_scene);
+        case 0x8d58426c: return reinterpret_cast<Address>(&get_song);
+        case 0x860c9b40: return reinterpret_cast<Address>(&song_position);
     }
     static const u32 ratios[32]={3,1,2,1,4,3,1,1,3,4,1,2,1,3,1,4,1,5,1,6,1,7,1,8,1,9,1,12,1,16,1,32};
     if (address>=0x840a36e0 && address<0x840a3760) return reinterpret_cast<Address>(ratios)+(address-0x840a36e0);
@@ -230,6 +254,27 @@ int main() {
     // Not accepted, nothing is granted.
     command=1; consume_record=true; key(50,true); key(50,false); consume_record=false;
     CHECK(writes==6 && undos==3);
+
+    // Scene boundaries: stock's step always runs; the event follows it, while playing.
+    using extensions::SceneCause;
+    playing=counting=0; sdk_extensions_stop(0x860c6adc);
+    CHECK(sdk_extensions_scene_boundary(0x860c6adc)==5 && step_calls==1 && seen.boundaries==0);
+    play(); scene_now=2;
+    CHECK(sdk_extensions_scene_boundary(0x860c6adc)==5 && seen.boundaries==1 && set_calls==0);
+    CHECK(seen.boundary.previous==2 && seen.boundary.scene==2 && seen.boundary.cause==SceneCause::kept);
+    CHECK(seen.boundary.song==extensions::no_song && seen.boundary.entry==0);
+    // A queued scene takes over.
+    queued_scene=4; sdk_extensions_scene_boundary(0x860c6adc);
+    CHECK(seen.boundaries==2 && set_calls==1 && seen.boundary.previous==2 && seen.boundary.scene==4);
+    CHECK(seen.boundary.cause==SceneCause::queued && seen.boundary.song==extensions::no_song);
+    // A song's entry, read before stock moves its position on.
+    song_now=1; song_position=3; sdk_extensions_scene_boundary(0x860c6adc);
+    CHECK(seen.boundaries==3 && seen.boundary.previous==4 && seen.boundary.scene==8 && song_position==4);
+    CHECK(seen.boundary.cause==SceneCause::song && seen.boundary.song==1 && seen.boundary.entry==3);
+    // Set-scene outside a boundary (the scene screen while stopped) is no event.
+    CHECK(sdk_extensions_scene_queued(6,0)==7 && scene_now==6 && seen.boundaries==3);
+    CHECK(sdk_extensions_scene_song(7,0)==7 && scene_now==7 && seen.boundaries==3);
+
 
     CHECK(!failed);
     return 0;

@@ -16,11 +16,15 @@ void sdk_extensions_live_note_on(opxy::u32, opxy::u32, opxy::u32, opxy::u32, opx
     __asm__("sdk_extensions_live_note_on");
 void sdk_extensions_live_note_off(opxy::u32, opxy::u32, opxy::u32, opxy::u32, opxy::u32,
     const void*) __asm__("sdk_extensions_live_note_off");
+opxy::u32 sdk_extensions_scene_boundary(opxy::u32) __asm__("sdk_extensions_scene_boundary");
+opxy::u32 sdk_extensions_scene_queued(opxy::u32, opxy::u32) __asm__("sdk_extensions_scene_queued");
+opxy::u32 sdk_extensions_scene_song(opxy::u32, opxy::u32) __asm__("sdk_extensions_scene_song");
 }
 
 namespace opxy { namespace platform {
 namespace {
 const u32 kController = 0x860c6adc;
+const u32 kSongPosition = kController + 0x3064;  // word: the song entry stock reads next
 const u32 kRecorder = 0x860c072c;
 const u32 kProject = 0x840a0524;
 const u32 kRecordHeld = kPlaying + 3;  // byte: Record held
@@ -117,6 +121,14 @@ u32 extension_write(u32 track, const RecordedNote* notes, u32 count, bool replac
     if (written || replace) stock<void(u32)>(0x8d587668)(track);  // A cleared pattern is a change too.
     return written;
 }
+u32 extension_scene() {
+    return word(kProject) ? stock<u32()>(0x8d5842cc)() : 0;  // project +6
+}
+u32 extension_song() {
+    if (!word(kProject)) return extensions::no_song;
+    const u32 song = stock<u32()>(0x8d58426c)();  // project +7; bit 4 set: no song
+    return song & 16 ? extensions::no_song : song;
+}
 void extension_notify(const char* text) {
     stock<void(const char*, u32, u32, u32)>(0x8d549168)(text, 1, 0, 0x3f000000u);
 }
@@ -181,4 +193,38 @@ u32 sdk_extensions_key_queue(const u32* event) {
     // The authenticated span includes stock's following R0 = queue address.
     // A 12-byte span admits CALL.A across the module's relative-call range.
     return 0x08023c78;
+}
+
+// The sequencer's scene boundary step 8d597e10(controller), called once each
+// time the playing scene's longest pattern ends (8d598548, inside the controller
+// update). It applies the queued scene (controller +0x8434) or else the active
+// song's next entry, each through set-scene 8d5857ac(scene, copy) at its own
+// call (8d597e40, 8d597f02), and moves the song position on.
+namespace {
+bool in_boundary;
+extensions::SceneBoundary boundary;
+}
+u32 sdk_extensions_scene_boundary(u32 controller) {
+    boundary = {extension_scene(), 0, extensions::SceneCause::kept, extensions::no_song, 0};
+    in_boundary = true;
+    const u32 result = stock<u32(u32)>(0x8d597e10)(controller);
+    in_boundary = false;
+    boundary.scene = extension_scene();
+    boundary.song = extension_song();
+    if (boundary.cause != extensions::SceneCause::song) boundary.entry = 0;
+    extensions_scene_boundary(boundary);
+    return result;
+}
+u32 sdk_extensions_scene_queued(u32 scene, u32 copy) {
+    const u32 result = stock<u32(u32, u32)>(0x8d5857ac)(scene, copy);
+    if (in_boundary) boundary.cause = extensions::SceneCause::queued;
+    return result;
+}
+u32 sdk_extensions_scene_song(u32 scene, u32 copy) {
+    // Stock has read this entry and moves the position on after this call.
+    if (in_boundary) {
+        boundary.cause = extensions::SceneCause::song;
+        boundary.entry = word(kSongPosition);
+    }
+    return stock<u32(u32, u32)>(0x8d5857ac)(scene, copy);
 }
