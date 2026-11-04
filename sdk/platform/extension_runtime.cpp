@@ -151,7 +151,7 @@ extensions::Write write_arrangement(const extensions::Context& expected, const e
     if (w.song >= arr::songs || !w.entries || !w.length || w.length > arr::entries || w.new_count > arr::scenes ||
         (w.new_count && (!w.new_slots || !w.new_scenes)))
         return Write::invalid;
-    if (!extensions::blank(before->song[w.song])) return Write::song_taken;
+    if (!w.replace && !extensions::blank(before->song[w.song])) return Write::song_taken;
     bool fresh[arr::scenes] = {};
     for (u32 i = 0; i < w.new_count; ++i) {
         const u32 slot = w.new_slots[i];
@@ -206,8 +206,16 @@ bool disarm_record(const extensions::Context& expected) {
         return false;
     return extension_disarm_record();
 }
+bool hold_song_end(const extensions::Context& expected) {
+    if (!(transaction.granted & action_hold_song_end)) return false;
+    bool playing = false;
+    const RecordingContext now = extension_context(playing);
+    if (!now.project || now.project != expected.recording.project || now.project != current.recording.project)
+        return false;
+    return extension_hold_song_end();
+}
 const extensions::Actions actions = {insert_notes, notify, replace_notes, read_arrangement, write_arrangement,
-                                     undo_arrangement, stop_song, disarm_record};
+                                     undo_arrangement, stop_song, disarm_record, hold_song_end};
 
 // The page left, to every page_left subscriber: actions as for a key of the
 // first of its claims limited to pages that covers the page left.

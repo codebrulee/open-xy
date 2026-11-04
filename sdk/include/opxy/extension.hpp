@@ -145,6 +145,9 @@ struct ArrangementWrite {
     const u8* new_slots;
     const SceneRow* new_scenes;
     u32 new_count;
+    // true: rewrite the song as `before` held it (an overdub), which it must
+    // still hold, instead of writing into a blank song.
+    bool replace;
 };
 // Each action needs its permission (profiles/extensions.json) and works only in
 // a queued_control callback for a key the extension claims, once stock accepted
@@ -180,6 +183,11 @@ struct Actions {
     // just started the transport armed, it starts without recording. Returns
     // false outside a project. Needs disarm_record.
     bool (*disarm_record)(const Context&);
+    // Until the transport stops: when the playing song would stop at its end
+    // (it doesn't loop), keep playing its last scene instead; song playback
+    // turns off as that entry starts, so the scene repeats until another is
+    // chosen. Returns false outside a project. Needs hold_song_end.
+    bool (*hold_song_end)(const Context&);
 };
 
 using OnContext = void (*)(const Context&);

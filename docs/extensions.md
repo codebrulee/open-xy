@@ -126,7 +126,7 @@ SDK's claims and actions. Each extension's `extension.json` lists those it uses.
   [`DoubleTap`](../sdk/include/opxy/double_tap.hpp) helper handles taps, holds,
   repeats and timeouts on any key without delaying stock controls.
   `record_double_tap` is capture's. The performance recorder's are
-  `performance_play` (Play on the arranger page, 47),
+  `performance_play` (Play on the arranger or song page, 47 and 48),
   `performance_stop` (Stop without Shift) and `performance_undo` (Shift + Stop
   on those screens, in place of stock's Shift + Stop there). Stock still arms,
   plays and stops: the owner follows stock's record arm
@@ -159,6 +159,8 @@ SDK's claims and actions. Each extension's `extension.json` lists those it uses.
     performance, and mutes `track_mute` still holds are dropped. Anything
     invalid or no longer fitting changes nothing. Stock's undo cannot take it
     back.
+    With `ArrangementWrite::replace` it rewrites the song the read found
+    instead (an overdub), which must still hold exactly that.
     It returns `Write::done` or why it refused: `playing`, `song_taken`,
     `scene_taken` (a slot is no longer empty), `invalid`, or `refused`.
   - `undo_arrangement` (requires `performance_undo`) unlocks
@@ -181,6 +183,12 @@ SDK's claims and actions. Each extension's `extension.json` lists those it uses.
     it plays without recording. The recorder calls it when its armed take is
     cancelled: on Stop, or (through `page_left`) on leaving the arranger page.
     It returns false outside a project or with a stale context.
+  - `hold_song_end` (requires `performance_play`) unlocks
+    `Actions::hold_song_end`: until the transport stops, a playing song that
+    would stop at its end (song flag bit 0) keeps playing its last scene
+    instead: song playback turns off as that entry starts, so the scene repeats
+    until another is chosen. A looping song still loops. It returns false
+    outside a project.
 
   Calls outside the callback, with a stale context, or a second write or
   popup in one callback are refused.

@@ -327,7 +327,7 @@ int main() {
         CHECK(event_calls==calls+1 && named(seen.control.claim, "performance_play") && seen.context.record_armed);
         key(51,false); key(50,false); playing=counting=0; sdk_extensions_stop(0x860c6adc);
         key(50,true); CHECK(!seen.context.record_armed); key(50,false);  // Record alone disarms
-        page=48; key(51,true); CHECK(!seen.control.claim && seen.context.page==48);  // arranger page only
+        page=48; key(51,true); CHECK(named(seen.control.claim, "performance_play") && seen.context.page==48);  // the song page too
         key(51,false); playing=counting=0; sdk_extensions_stop(0x860c6adc);
         page=12; calls=event_calls; key(51,true);
         CHECK(event_calls==calls+1 && !seen.control.claim);
@@ -345,10 +345,11 @@ int main() {
         page=12; sdk_extensions_controller_update(0x860c6adc, 17);
         CHECK(pages_left==left_before+1 && last_left.page==47 && named(last_left.claim, "performance_play"));
         CHECK(extensions::probe::disarm_ok && !(armed & 0xff) && !(armed_copy & 0xff) && recorder_notices==1);
-        // A page no claim covers: told, but no action granted.
+        // The song page: the first claim covering it (Play, then Shift + Stop) is named.
         page=48; sdk_extensions_controller_update(0x860c6adc, 17);
         page=12; sdk_extensions_controller_update(0x860c6adc, 17);
-        CHECK(pages_left==left_before+3 && last_left.page==48 && named(last_left.claim, "performance_undo"));
+        CHECK(pages_left==left_before+3 && last_left.page==48 && named(last_left.claim, "performance_play"));
+        // A page no claim covers: told, but no action granted.
         page=13; sdk_extensions_controller_update(0x860c6adc, 17);
         CHECK(pages_left==left_before+4 && last_left.page==12 && !last_left.claim && !extensions::probe::disarm_ok);
         extensions::probe::disarm_command=0;
@@ -489,7 +490,7 @@ int main() {
     static extensions::SceneRow row;
     row=snapshot.scene[1]; row.mute[3]=2;
     static const u8 entries[]={0,3}, slots[]={3};
-    plan={&snapshot,1,entries,2,slots,&row,1};
+    plan={&snapshot,1,entries,2,slots,&row,1,false};
     const u32 calls=scene_mute_calls;
     // Stop writes it, once, and restores the mutes: the current scene's through stock's mute.
     key(52,true); key(52,false);
@@ -502,12 +503,12 @@ int main() {
     // an entry naming an empty scene; a write while playing.
     key(52,true); key(52,false); CHECK(!write_ok && write_result==Write::song_taken && changes==1);
     static const u8 bad_entries[]={9};
-    plan={&snapshot,2,bad_entries,1,nullptr,nullptr,0};
+    plan={&snapshot,2,bad_entries,1,nullptr,nullptr,0,false};
     key(52,true); key(52,false); CHECK(!write_ok && write_result==Write::invalid && changes==1);
-    plan={&snapshot,2,entries,2,slots,&row,1};  // scene 3 is present now
+    plan={&snapshot,2,entries,2,slots,&row,1,false};  // scene 3 is present now
     key(52,true); key(52,false); CHECK(!write_ok && write_result==Write::scene_taken && changes==1);
     static const u8 fine[]={0};
-    plan={&snapshot,2,fine,1,nullptr,nullptr,0};
+    plan={&snapshot,2,fine,1,nullptr,nullptr,0,false};
     playing=1; key(52,false); CHECK(!write_ok);  // a release grants nothing
     // A song holding one scene other than scene 1 is taken; stock's blank song
     // (one entry, scene 1) is not.
@@ -520,7 +521,7 @@ int main() {
     // Undo: Shift + Stop on the arranger or song screen is the probe's replacing
     // claim, so stock never sees it; elsewhere it stays stock's, and Stop's
     // write claim never fires with Shift held.
-    plan={&snapshot,1,entries,2,slots,&row,1};
+    plan={&snapshot,1,entries,2,slots,&row,1,false};
     shift=1; const u32 undo_calls=event_calls;
     key(52,true); key(52,false); CHECK(event_calls==undo_calls+2 && !undo_ok && !write_ok && changes==2);
     page=48;
@@ -546,6 +547,39 @@ int main() {
     key(52,true); key(52,false); CHECK(!undo_ok && undo_result==Undo::edited && changes==3);
     shift=0; page=0;
     arrangement_command=0;
+
+    // An overdub's write (replace) rewrites the song the read found, if it still
+    // holds that; a blank song isn't needed.
+    {
+        static const u8 overdubbed[1] = {1};
+        arrangement_command=1; page=47; play(); playing=counting=0; sdk_extensions_stop(0x860c6adc);
+        CHECK(read_ok && snapshot.song[0].length==2);
+        plan={&snapshot,0,overdubbed,1,nullptr,nullptr,0,true};
+        key(52,true); key(52,false);
+        CHECK(write_ok && song_memory[0]==1 && *reinterpret_cast<u32*>(song_memory+0x60)==1);
+        key(52,true); key(52,false);  // the song no longer holds what was read
+        CHECK(!write_ok && write_result==Write::song_taken);
+        arrangement_command=0; page=0;
+    }
+    // hold_song_end: a song that stops at its end (flag bit 0) has song playback
+    // turned off as its last entry starts, so that scene repeats; until Stop.
+    {
+        using extensions::probe::hold_command;
+        using extensions::probe::hold_ok;
+        *reinterpret_cast<u32*>(song_memory+0x60)=2; song_memory[0x64]=1;
+        queued_scene=~0u; song_now=0; page=47;
+        hold_command=1; play(); CHECK(hold_ok);
+        song_position=0; sdk_extensions_scene_boundary(0x860c6adc); CHECK(!(song_now & 16) && song_position==1);
+        sdk_extensions_scene_boundary(0x860c6adc); CHECK(song_now & 16);  // entry 1 is the last
+        playing=counting=0; sdk_extensions_stop(0x860c6adc);
+        hold_command=0; hold_ok=false; song_now=0; play();
+        song_position=1; sdk_extensions_scene_boundary(0x860c6adc); CHECK(!(song_now & 16));  // Stop ended it
+        playing=counting=0; sdk_extensions_stop(0x860c6adc);
+        song_memory[0x64]=0; hold_command=1; song_now=0; play(); CHECK(hold_ok);
+        song_position=1; sdk_extensions_scene_boundary(0x860c6adc); CHECK(!(song_now & 16));  // a looping song loops
+        playing=counting=0; sdk_extensions_stop(0x860c6adc);
+        hold_command=0; song_now=16; page=0;
+    }
 
     CHECK(!failed);
     return 0;

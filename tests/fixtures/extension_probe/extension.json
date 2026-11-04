@@ -15,6 +15,7 @@
     "write_arrangement",
     "undo_arrangement",
     "stop_song",
-    "disarm_record"
+    "disarm_record",
+    "hold_song_end"
   ]
 }

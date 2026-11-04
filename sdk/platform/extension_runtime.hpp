@@ -15,6 +15,7 @@ const u32 action_write_arrangement = 1u << 3;
 const u32 action_undo_arrangement = 1u << 4;
 const u32 action_stop_song = 1u << 5;
 const u32 action_disarm_record = 1u << 6;
+const u32 action_hold_song_end = 1u << 7;
 
 struct ExtensionEntry {
     const char* id;
@@ -85,7 +86,8 @@ bool extension_read_arrangement(extensions::Arrangement& out);
 extensions::Write extension_write_arrangement(const extensions::ArrangementWrite& write);
 extensions::Undo extension_undo_arrangement(const extensions::ArrangementWrite& write);
 bool extension_stop_song();  // set project +7 bit 4 (8d584284)
-bool extension_disarm_record();  // clear the record arm (+0x305f) and Play's copy of it (+0x3061)
+bool extension_disarm_record();
+bool extension_hold_song_end();  // until Stop: a song that would stop at its end keeps its last scene  // clear the record arm (+0x305f) and Play's copy of it (+0x3061)
 // The collection was found valid: the adapter starts what it adds beside the
 // events (the indicator's overlay client).
 void extension_started();

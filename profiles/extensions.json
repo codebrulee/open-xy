@@ -2,7 +2,7 @@
   "schema": 3,
   "claims": {
     "record_double_tap": {"label": "Record double-tap", "key": 50},
-    "performance_play": {"label": "Play on the arranger page", "key": 51, "pages": [47]},
+    "performance_play": {"label": "Play on the arranger or song page", "key": 51, "pages": [47, 48]},
     "performance_stop": {"label": "Stop writes a performance", "key": 52, "shift": "released"},
     "performance_undo": {"label": "Shift + Stop on arranger or song screen", "key": 52, "pages": [47, 48], "shift": "held", "replaces": true}
   },
@@ -13,6 +13,7 @@
     "write_arrangement": {"requires": "performance_stop"},
     "undo_arrangement": {"requires": "performance_undo"},
     "stop_song": {"requires": "performance_play"},
-    "disarm_record": {"requires": ["performance_play", "performance_stop"]}
+    "disarm_record": {"requires": ["performance_play", "performance_stop"]},
+    "hold_song_end": {"requires": "performance_play"}
   }
 }

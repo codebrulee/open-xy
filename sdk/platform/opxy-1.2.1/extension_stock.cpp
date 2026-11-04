@@ -32,6 +32,8 @@ namespace {
 // and the copy flag its immediate switch would have passed to set-scene.
 const opxy::u32 no_held_scene = ~0u;
 opxy::u32 held_scene = no_held_scene, held_copy = 0;
+// hold_song_end, until Stop.
+bool holding_song_end = false;
 }
 namespace opxy { namespace platform {
 namespace {
@@ -153,6 +155,11 @@ u32 extension_song() {
 // SDK's Stop hook wraps, which would stop a transport Play has just started.
 // Play has also already copied the arm into +0x3061, which the transport reads
 // when it starts. So this writes both bytes and sends the notice, without the stop.
+bool extension_hold_song_end() {
+    if (!word(kProject)) return false;
+    holding_song_end = true;
+    return true;
+}
 bool extension_disarm_record() {
     if (!word(kProject)) return false;
     *at<unsigned char>(kRecordArmed) = 0;
@@ -221,6 +228,7 @@ void sdk_extensions_stop(u32 controller) {
     stock<void(u32)>(0x8d591964)(controller);
     apply_held_mutes();
     held_scene = no_held_scene;
+    holding_song_end = false;
     // Observe Stop even when an external Stop/Start pair arrives in one update.
     // Both stock playing flags are already clear at this call site.
     extensions_sync();
@@ -302,13 +310,30 @@ u32 sdk_extensions_scene_queued(u32 scene, u32 copy) {
     if (in_boundary) boundary.cause = extensions::SceneCause::queued;
     return result;
 }
+// A song's record: 96 scene bytes, its length (+0x60) and flags (+0x64). With
+// flag bit 0 set, the boundary step stops the transport (8d597d00, from
+// 8d597f4c) once the song wraps past its last entry; clear, it loops.
+bool song_stops_at_end(u32 song, u32* length) {
+    const u32 project = word(kProject);
+    if (!project || song >= extensions::arrangement::songs) return false;
+    const u32 record = project + 0x5401bc + song * 0x68;
+    *length = word(record + 0x60);
+    return (*at<unsigned char>(record + 0x64) & 1) != 0;
+}
 u32 sdk_extensions_scene_song(u32 scene, u32 copy) {
     // Stock has read this entry and moves the position on after this call.
+    const u32 entry = word(kSongPosition);
     if (in_boundary) {
         boundary.cause = extensions::SceneCause::song;
-        boundary.entry = word(kSongPosition);
+        boundary.entry = entry;
     }
-    return stock<u32(u32, u32)>(0x8d5857ac)(scene, copy);
+    const u32 result = stock<u32(u32, u32)>(0x8d5857ac)(scene, copy);
+    // hold_song_end: the last entry of a song that would stop starts with song
+    // playback off, so the next boundary keeps this scene instead of stopping.
+    u32 length = 0;
+    if (holding_song_end && in_boundary && song_stops_at_end(extension_song(), &length) && length && entry + 1 == length)
+        stock<void()>(0x8d584284)();
+    return result;
 }
 
 // The arranger page's scene choice 8c095cde(page, scene). Shift + Play sets the
@@ -412,7 +437,15 @@ extensions::Write extension_write_arrangement(const extensions::ArrangementWrite
     if (!project) return Write::refused;
     if (stock_playing()) return Write::playing;
     const u32 length = *song_length(project, w.song);
-    if (length > 1 || (length == 1 && *project_byte(project, kSongs + w.song * kSongBytes))) return Write::song_taken;
+    if (w.replace) {
+        // An overdub: the song must still be as the read found it.
+        const extensions::SongRow& was = w.before->song[w.song];
+        if (length != was.length) return Write::song_taken;
+        for (u32 e = 0; e < length && e < arr::entries; ++e)
+            if (*project_byte(project, kSongs + w.song * kSongBytes + e) != was.entry[e]) return Write::song_taken;
+    } else if (length > 1 || (length == 1 && *project_byte(project, kSongs + w.song * kSongBytes))) {
+        return Write::song_taken;
+    }
     for (u32 i = 0; i < w.new_count; ++i)
         if (*scene_byte(project, w.new_slots[i], 2 * arr::tracks)) return Write::scene_taken;
     // Held mutes would land after the write; the write replaces them.

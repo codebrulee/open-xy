@@ -20,7 +20,9 @@ u32 command, written;
 // What Play and Stop do: 0 nothing, 1 read the arrangement on Play and write
 // `plan` on Stop, and undo `plan` on the performance_undo claim.
 u32 arrangement_command;
-bool read_ok, write_ok, undo_ok, stop_ok, disarm_ok;
+bool read_ok, write_ok, undo_ok, stop_ok, disarm_ok, hold_ok;
+// Play asks for hold_song_end while set.
+u32 hold_command;
 // Leaving a page its performance_play claim covers disarms stock's record arm while set.
 u32 disarm_command;
 Undo undo_result = Undo::refused;
@@ -57,6 +59,7 @@ void page_left(const Context& c, const PageLeft& left, const Actions& actions) {
 void queued_control(const Context& c, const Control& k, const Actions& actions) {
     ++seen.controls;
     seen.control = k;
+    if (hold_command && k.pressed && k.key == keys::play) hold_ok = actions.hold_song_end(c);
     if (arrangement_command && k.pressed && k.key == keys::play) {
         stop_ok = actions.stop_song(c);
         read_ok = actions.read_arrangement(c, snapshot);

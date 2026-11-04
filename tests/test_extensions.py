@@ -50,7 +50,7 @@ class Extensions(unittest.TestCase):
         self.assertEqual((probe.id, probe.claims, probe.actions),
                          ('probe', ('record_double_tap', 'performance_play', 'performance_stop', 'performance_undo'),
                           ('edit_notes', 'notify', 'read_arrangement', 'write_arrangement', 'undo_arrangement',
-                           'stop_song', 'disarm_record')))
+                           'stop_song', 'disarm_record', 'hold_song_end')))
         for changes in (
             dict(id='../probe'), dict(id='runtime'), dict(id='delete'),  # paths, SDK objects, C++ keywords
             dict(claims=[]),  # edit_notes needs its claim
@@ -133,7 +133,7 @@ class Extensions(unittest.TestCase):
         [entry] = extensions.metadata([probe], {'probe': 'personal'})
         self.assertEqual(entry['origin'], 'personal')
         self.assertEqual(entry['claim_labels'], {'record_double_tap': 'Record double-tap',
-                                                 'performance_play': 'Play on the arranger page',
+                                                 'performance_play': 'Play on the arranger or song page',
                                                  'performance_stop': 'Stop writes a performance',
                                                  'performance_undo': 'Shift + Stop on arranger or song screen'})
         self.assertLessEqual(len(entry['description']), extensions.TEXT_LIMITS['description'])
