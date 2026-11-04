@@ -1813,6 +1813,84 @@
       ]
     },
     {
+      "kind": "hook",
+      "address": "0x8d58e8d2",
+      "file_offset": "0x1c5b2e",
+      "length": 4,
+      "before": "ffe36db7",
+      "symbol": "sdk_extensions_scene_select",
+      "call": true,
+      "service": "extensions",
+      "events": [
+        "scene_select"
+      ]
+    },
+    {
+      "kind": "hook",
+      "address": "0x8d58e8e2",
+      "file_offset": "0x1c5b3e",
+      "length": 4,
+      "before": "00e3f748",
+      "symbol": "sdk_extensions_scene_jump",
+      "call": true,
+      "service": "extensions",
+      "events": [
+        "scene_select"
+      ]
+    },
+    {
+      "kind": "hook",
+      "address": "0x8d58e90a",
+      "file_offset": "0x1c5b66",
+      "length": 4,
+      "before": "ffe351b7",
+      "symbol": "sdk_extensions_scene_select",
+      "call": true,
+      "service": "extensions",
+      "events": [
+        "scene_select"
+      ]
+    },
+    {
+      "kind": "hook",
+      "address": "0x8d58e91a",
+      "file_offset": "0x1c5b76",
+      "length": 4,
+      "before": "00e3db48",
+      "symbol": "sdk_extensions_scene_jump",
+      "call": true,
+      "service": "extensions",
+      "events": [
+        "scene_select"
+      ]
+    },
+    {
+      "kind": "hook",
+      "address": "0x8d58e93c",
+      "file_offset": "0x1c5b98",
+      "length": 4,
+      "before": "ffe338b7",
+      "symbol": "sdk_extensions_scene_select",
+      "call": true,
+      "service": "extensions",
+      "events": [
+        "scene_select"
+      ]
+    },
+    {
+      "kind": "hook",
+      "address": "0x8d58e94c",
+      "file_offset": "0x1c5ba8",
+      "length": 4,
+      "before": "00e3c248",
+      "symbol": "sdk_extensions_scene_jump",
+      "call": true,
+      "service": "extensions",
+      "events": [
+        "scene_select"
+      ]
+    },
+    {
       "kind": "startup",
       "name": "Boot-screen version label",
       "address": "0x8c0b85dc",

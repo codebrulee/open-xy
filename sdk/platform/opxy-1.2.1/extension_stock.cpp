@@ -28,9 +28,10 @@ opxy::u32 sdk_extensions_scene_jump(opxy::u32, opxy::u32, opxy::u32) __asm__("sd
 }
 
 namespace {
-// A scene choice scene_select held as stock's cue, until the boundary applies it.
+// A scene choice scene_select held as stock's cue, until the boundary applies it,
+// and the copy flag its immediate switch would have passed to set-scene.
 const opxy::u32 no_held_scene = ~0u;
-opxy::u32 held_scene = no_held_scene;
+opxy::u32 held_scene = no_held_scene, held_copy = 0;
 }
 namespace opxy { namespace platform {
 namespace {
@@ -283,7 +284,7 @@ u32 sdk_extensions_scene_boundary(u32 controller) {
     return result;
 }
 u32 sdk_extensions_scene_queued(u32 scene, u32 copy) {
-    if (in_boundary && scene == held_scene) copy = 1;  // as the immediate switch would
+    if (in_boundary && scene == held_scene) copy = held_copy;  // as the immediate switch would
     held_scene = no_held_scene;
     const u32 result = stock<u32(u32, u32)>(0x8d5857ac)(scene, copy);
     if (in_boundary) boundary.cause = extensions::SceneCause::queued;
@@ -303,12 +304,16 @@ u32 sdk_extensions_scene_song(u32 scene, u32 copy) {
 // queue (+0x8434), which the boundary step applies. Otherwise it switches at
 // once: set-scene(scene, 1) (8c095d1a; 1 clones the current scene into an empty
 // one), 8d585ee8() (8c095d22), and 8d597ad0(controller, scene, 0) (8c095d36),
-// which moves playback to the new scene. A held switch takes the cue's path:
-// the first call queues the scene and the other two are skipped.
+// which moves playback to the new scene. MIDI's immediate scene changes
+// (previous 8d58e8bc, next 8d58e8f8, set 8d58e930) make the same set-scene
+// (passing 0: no clone) and jump calls, without the notice; MIDI's queued
+// change (8d58e894) already writes the cue. A held switch takes the cue's path:
+// the first call queues the scene and the rest are skipped.
 // The cue's set-scene at the boundary passes 0, so it would not clone the
-// current scene into an empty one as the immediate switch does: a held choice
-// is remembered (held_scene) and its boundary call
-// passes 1, so the scene plays as the immediate switch would have made it.
+// current scene into an empty one as the arranger's immediate switch does: a
+// held choice is remembered (held_scene, held_copy) and its boundary call
+// passes the caller's flag, so the scene plays as the immediate switch would
+// have made it.
 namespace {
 bool skip_scene_switch;
 const u32 kSceneQueue = 0x860c6adc + 0x8434;
@@ -318,6 +323,7 @@ u32 sdk_extensions_scene_select(u32 scene, u32 copy) {
     if (!skip_scene_switch) return stock<u32(u32, u32)>(0x8d5857ac)(scene, copy);
     *at<u32>(kSceneQueue) = scene;
     held_scene = scene;
+    held_copy = copy;
     return 0;
 }
 u32 sdk_extensions_scene_switched(u32 a, u32 b, u32 c) {

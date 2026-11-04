@@ -64,8 +64,9 @@ struct TrackMute {
 // boundary's event, or at once when the transport stops. Stopped, mutes always
 // apply at once.
 enum class MuteTiming : u8 { now, next_boundary };
-// A scene chosen on the arranger page with Shift + 1-0, which stock switches to
-// at once (its Shift + Play cue waits instead, and is not reported).
+// A scene chosen on the arranger page with Shift + 1-0, or by MIDI's previous,
+// next or set scene, which stock switches to at once (its Shift + Play cue and
+// MIDI's queued scene wait instead, and are not reported).
 struct SceneSelect {
     u32 scene;  // 0-98
 };

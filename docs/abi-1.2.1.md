@@ -197,8 +197,13 @@ clones the current scene into an empty one), `0x8d585ee8()` (`0x8c095d22`) and
 `scene_select` hooks replace those three calls; a held choice writes the queue
 instead and skips the other two, as the cue would. The queued path at the
 boundary calls set-scene with 0, which would not clone into an empty scene, so
-for a held choice the SDK passes 1 there (forgotten at Stop). MIDI scene changes go through `0x8d58e8xx` (queue, previous, next and
-direct cases) and are not hooked.
+for a held choice the SDK passes the flag the immediate switch would have
+passed there (forgotten at Stop). MIDI's scene changes are cases of one handler: the queued case
+(`0x8d58e894`) writes the queue, and previous (`0x8d58e8bc`), next (`0x8d58e8f8`)
+and set (`0x8d58e930`) switch at once with set-scene `(scene, 0)` (no clone) and
+the same playback jump, without the notice. `scene_select` hooks those set-scene
+and jump calls too (`0x8d58e8d2`/`0x8d58e8e2`, `0x8d58e90a`/`0x8d58e91a`,
+`0x8d58e93c`/`0x8d58e94c`); a held MIDI choice keeps its 0 at the boundary.
 
 Mutes live in the current scene: 16 bytes after its 16 pattern numbers, 2 for
 muted. Stock's mute `0x8d5934fc(controller, track, value)`, reached by the track

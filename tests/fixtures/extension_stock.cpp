@@ -122,6 +122,12 @@ void arranger_select(u32 scene) {
     sdk_extensions_scene_switched(0, 0, 0);
     sdk_extensions_scene_jump(0x860c6adc, scene, 0);
 }
+// MIDI's immediate scene change (8d58e8bc, 8d58e8f8, 8d58e930): set-scene
+// passing 0, then the jump, through the hooked sites.
+void midi_select(u32 scene) {
+    sdk_extensions_scene_select(scene, 0);
+    sdk_extensions_scene_jump(0x860c6adc, scene, 0);
+}
 u32 get_scene() { return scene_now; }
 u32 get_song() { return song_now; }
 void song_off() { song_now |= 16; }
@@ -399,6 +405,13 @@ int main() {
     CHECK(scene_now==4 && switch_notices==3 && jumps==3 && queued_scene==~0u);
     select_answer=SceneTiming::now;
     play();
+    // MIDI scene changes are held the same way, and keep MIDI's 0 at the boundary.
+    select_answer=SceneTiming::next_boundary;
+    midi_select(9);
+    CHECK(seen.select.scene==9 && queued_scene==9 && scene_now==4 && jumps==3);
+    sdk_extensions_scene_boundary(0x860c6adc); CHECK(scene_now==9 && set_copy==0);
+    select_answer=SceneTiming::now;
+    midi_select(5); CHECK(scene_now==5 && set_copy==0 && jumps==4 && jumped_to==5);
     seen.boundaries=3;  // the mute checks below count from here
 
     // Mutes: every press reaches track_mute first. Answered now, stock acts at once.
