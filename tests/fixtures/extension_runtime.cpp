@@ -8,6 +8,8 @@ bool playing = true;
 u32 writes, notices, observations, order[16], order_count, result, mode, written_track;
 extensions::Actions saved;
 extensions::Context saved_context;
+const char* last_claim;
+u32 claimed_keys;
 const RecordedNote good = {-12, 60, 60, 100};
 void first_note(const extensions::Context&, const extensions::LiveNote& note) {
     order[order_count++] = 1;
@@ -20,7 +22,10 @@ void observe_control(const extensions::Context& context, const extensions::Contr
     result = actions.insert_notes(context, 0, &good, 1);
     actions.notify("unauthorized");
 }
-void edit_control(const extensions::Context& context, const extensions::Control&, const extensions::Actions& actions) {
+void edit_control(const extensions::Context& context, const extensions::Control& control, const extensions::Actions& actions) {
+    last_claim = control.claim;
+    if (control.claim) ++claimed_keys;
+    if (control.key == 52) return;
     saved = actions; saved_context = context;
     RecordedNote note = good;
     u32 track = context.recording.track;
@@ -42,9 +47,14 @@ const extensions::Hooks first = extensions::Hooks().with_recordable_note_on(firs
 const extensions::Hooks second = extensions::Hooks().with_recordable_note_on(second_note)
                                                     .with_queued_control(edit_control);
 // Two claims on different keys. edit_notes needs the first (or any claim once
-// set to 0); notify needs any claim its holder owns.
-u32 claim_keys[] = {50, 51}, action_claims[] = {1u, 0};
-const ExtensionRegistry tables = {claim_keys, 2, action_claims, 2};
+// set to 0); notify needs any claim its holder owns. A third, held by no one
+// until the replacing test, takes key 52 with Record held on page 48 only.
+ClaimSpec claim_specs[] = {{"double", 50, {0}, 0, ClaimHeld::any, ClaimHeld::any, false},
+                           {"second", 51, {0}, 0, ClaimHeld::any, ClaimHeld::any, false},
+                           {"song", 52, {47, 48}, 2, ClaimHeld::held, ClaimHeld::released, true}};
+u32 action_claims[] = {1u, 0};
+const ExtensionRegistry tables = {claim_specs, 3, action_claims, 2};
+
 ExtensionEntry collection[] = {{"observer", 0, 0, &first},
                                {"writer", 1u, action_edit_notes | action_notify, &second}};
 }
@@ -63,10 +73,21 @@ u32 extension_write(u32 track, const RecordedNote*, u32 count, bool replace) {
     ++writes; replaced = replace; written_track = track; return count;
 }
 void extension_notify(const char*) { ++notices; }
+// Arrangement actions are exercised end to end in extension_stock.cpp.
+bool extension_read_arrangement(extensions::Arrangement&) { return false; }
+extensions::Write extension_write_arrangement(const extensions::ArrangementWrite&) { return extensions::Write::refused; }
+extensions::Undo extension_undo_arrangement(const extensions::ArrangementWrite&) { return extensions::Undo::refused; }
+bool extension_stop_song() { return false; }
+bool extension_record_armed() { return false; }
 }}
+ClaimState state = {0, false, false};
 void control(u32 key, bool accepted) {
-    const extensions::Control event = {key, false, accepted, true, 100};
-    extensions_queued_control(event);
+    const extensions::Control event = {key, false, accepted, true, 100, nullptr};
+    extensions_queued_control(event, state);
+}
+bool replaces(u32 key) {
+    const extensions::Control event = {key, true, true, true, 100, nullptr};
+    return extensions_replaces(event, state);
 }
 int main() {
     extensions_recordable_note_on(0, 60, 100);
@@ -121,5 +142,22 @@ int main() {
     // An action whose claim its holder lacks disables the collection.
     initialized = false; entries = nullptr; action_claims[0] = 1u;
     control(51, true); CHECK(writes == before + 1);
+    // The receiver learns which of its claims fired; others' claims are not named.
+    initialized = false; entries = nullptr; action_claims[0] = 0;
+    collection[1].claims = 2u | 4u;
+    last_claim = "stale"; control(51, true); CHECK(last_claim && same_text(last_claim, "second"));
+    control(12, true); CHECK(!last_claim);
+    // A replacing claim fires only on its page with Record held, and only for its holder.
+    CHECK(!replaces(52));
+    state = {48, false, false}; CHECK(!replaces(52));
+    state = {46, true, false}; CHECK(!replaces(52));
+    state = {47, true, false}; CHECK(replaces(52));
+    state = {48, true, true}; CHECK(!replaces(52));  // Shift must be released
+    state = {48, true, false}; CHECK(replaces(52) && !replaces(51));
+    const u32 claimed = claimed_keys;
+    control(52, true); CHECK(claimed_keys == claimed + 1 && same_text(last_claim, "song"));
+    control(52, false); CHECK(claimed_keys == claimed + 1 && !last_claim);  // not taken: no claim
+    initialized = false; entries = nullptr; collection[1].claims = 2u;
+    CHECK(!replaces(52));
     return 0;
 }

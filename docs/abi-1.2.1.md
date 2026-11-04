@@ -186,6 +186,20 @@ the step returns. Scene and song come from stock's getters `0x8d5842cc` (project
 same step from `0x8d597fb8` and `0x8d598ac6`, which are not hooked: a subscriber
 learns the opening scene as the first boundary's `previous`.
 
+The arranger page (pattern.svg, page 47) chooses a scene through `0x8c095cde(page,
+scene)`, from four call sites (8c095ffc, 8c0962cc, 8c0964de, 8c096510; the last two
+are next and previous), including Shift + 1–0. Shift + Play sets the page's cue byte
+(`+0x28`, cleared when Shift is released, when the page opens and when stopped);
+a cued choice only writes the controller's queue (`+0x8434`) and redraws. An
+uncued one switches at once: set-scene `0x8d5857ac(scene, 1)` (`0x8c095d1a`; 1
+clones the current scene into an empty one), `0x8d585ee8()` (`0x8c095d22`) and
+`0x8d597ad0(controller, scene, 0)` (`0x8c095d36`), which moves playback. The
+`scene_select` hooks replace those three calls; a held choice writes the queue
+instead and skips the other two, as the cue would. The queued path at the
+boundary calls set-scene with 0, which would not clone into an empty scene, so
+for a held choice the SDK passes 1 there (forgotten at Stop). MIDI scene changes go through `0x8d58e8xx` (queue, previous, next and
+direct cases) and are not hooked.
+
 Mutes live in the current scene: 16 bytes after its 16 pattern numbers, 2 for
 muted. Stock's mute `0x8d5934fc(controller, track, value)`, reached by the track
 keys and MIDI, writes the byte through `0x8d585394(track, value)` (hooked at
@@ -197,13 +211,39 @@ event, from the Stop hook, or from the controller update once stock is no longer
 playing. Its own call passes through the hooks without an event. Verified on
 hardware with a probe of the same sites: key and mixer mutes held to the
 boundary, cancelled by a second press, applied at Stop.
+
+The arrangement actions read and write the open project (word `0x840a0524`)
+directly: scene rows of 33 bytes at `+0x98` (16 pattern numbers, 16 mutes, a
+present byte) and 14 songs of `0x68` bytes at `+0x5401bc` (96 scene numbers, the
+length as a word at `+0x60`). No stock setter exists for song entries. A write
+restores mutes in the current scene through `0x8d5934fc`, so the DSP board
+agrees, and in other scenes by byte; writes new scene rows, then the song's
+entries, then its length, so the song exists only once whole; marks the project
+changed as stock's setters do (the word at `0x840a0530` incremented, the byte at
+`0x840a052c` set); and asks the pattern screen to redraw (`0x8d55adf0`, as stock
+does after a MIDI scene change). An undo checks the project still holds what was
+written and that neither the song (project `+7`, unless it was already selected
+at the read) nor a new scene (`+6`) is in use, then writes the song's length, its entries, and the scene rows back from
+the read, marks the project changed and redraws the same way. With Shift held,
+stock's Record key does not set Record held (controller `+0x3060`); Shift + Stop
+(shift table `0x8400b748` → `0x8c0925f8`) only calls `0x8c0a1454`, the step
+Stop runs first, and does not stop the transport.
 The controller-update call follows the GUI tick call in the same main loop;
 they are separate sites. The Stop hook observes a stop/restart pair within one controller update. The key
 span also replaces the following queue-address load; its wrapper returns that
 address in R0. This
 permits an absolute call without changing the stock stack or adding assembly.
 Immediate input is restricted by stock to keyboard keys 26–49; Record (50)
-uses the queue. The live-note wrappers also cancel interrupted tap gestures.
+uses the queue. A claim that replaces stock skips stock's key handler
+`0x8c0b5d58` for that event; its page condition reads stock's selected page,
+the word at `0x84039230` (getter `0x8d4d6ed8`, set on navigation through
+`0x8d4d6e5c`), numbered as pages register with `0x8d5208a4` (`pattern.svg`,
+the arranger, is 47; `songmode.svg` is 48). Stock's Play (key 51, table
+`0x8400b824` → `0x8c0929b8`) with Record held only arms recording (controller
+`+0x305f`, `Context::record_armed`; a Record press clears it through
+`0x8d592998`); stopped, it posts a start
+(`0x8d5aa9ee`), so the transport reads stopped for a while after the key.
+Stop (52 → `0x8c092a50`) stops at once through `0x8d597d00`. The live-note wrappers also cancel interrupted tap gestures.
 The onset wrapper establishes a scoped live-input identity; only stock-accepted
 notes inside that scope enter history. Direct sequencer calls and step entry do
 not. Stock input arguments and normal recording actions are forwarded unchanged.

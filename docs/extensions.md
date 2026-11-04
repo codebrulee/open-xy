@@ -57,8 +57,8 @@ of its own beside it.
 | Access | Rule | Here |
 | --- | --- | --- |
 | Observe | Read-only; every subscriber, in collection order | Every event |
-| Transform | One ordered chain that may change or drop the event | `track_mute`: any subscriber can hold a mute until the next scene boundary |
-| Claim | One owner per build; a second claimant fails the build | `record_double_tap` |
+| Transform | One ordered chain that may change or drop the event | `track_mute` and `scene_select`: any subscriber can hold a mute, or cue a scene choice, until the next scene boundary |
+| Claim | One owner per build; a second claimant fails the build | `record_double_tap`, `performance_play`, `performance_stop`, `performance_undo` |
 
 ### Thread and host
 
@@ -72,7 +72,7 @@ filters to that track for it.
 | Kind | What | Here |
 | --- | --- | --- |
 | Events | Something happened | The `Hooks` callbacks |
-| Actions | Change something through stock | `Actions::insert_notes`, `Actions::replace_notes`, `Actions::notify` |
+| Actions | Change something through stock | `Actions::insert_notes`, `Actions::replace_notes`, `Actions::notify`, `Actions::read_arrangement`, `Actions::write_arrangement` |
 | Surfaces | Add to the screen | None for extensions yet: menu rows, pages, overlays |
 | Saved state | Data kept with a project | None for extensions yet |
 
@@ -95,9 +95,10 @@ only for the callback. The SDK does not sandbox native code.
 | `selected_note_off` | A live release on the selected track, playing or not; may have no preceding onset | Live release |
 | `recording_tick` | The selected track's scaled Q8 recording time, while playing and recordable; a discontinuity asks the subscriber to discard timing | Recorder tick |
 | `input_activity` | Any live note input, accepted or not, on any track; for cancelling gestures | Live onset |
-| `queued_control` | A queued key (Record and the other queued controls; not keyboard keys 26–49) after stock handled it, with a microsecond time. `accepted`: stock took it as input (for Record, stock registered the press or release); `unmodified`: no other key or Shift held. Key numbers are in `keys` | Key queue |
+| `queued_control` | A queued key (Record and the other queued controls; not keyboard keys 26–49) after stock handled it, with a microsecond time. `accepted`: stock took it as input (for Record, stock registered the press or release); `unmodified`: no other key or Shift held; `claim`: the name of the receiver's claim it fired, or null. Key numbers are in `keys` | Key queue |
 | `scene_boundary` | The playing scene's longest pattern ended and stock chose the next scene: the scene that ended and the one that starts, why (`kept`, `queued` or the active `song`), the song and, for a song, the entry that starts. Only while playing; stock's own song position has already moved on | Boundary step, its queued and song scene changes |
 | `track_mute` | A mute or unmute pressed (`keys`: Instrument or Aux + 1–8, or MIDI; `mixer`), playing or stopped, before stock applies it: the scene's mute slot (0–15) and whether it mutes. The answer `next_boundary` holds it while playing; the SDK applies held mutes after the next boundary, before `scene_boundary`, or when the transport stops. A press on a track with a held mute cancels it (`cancels_held`) | Mute's scene write and DSP message, the mixer's toggle |
+| `scene_select` | A scene chosen on the arranger page with Shift + 1–0, which stock switches to at once, playing or stopped: the scene (0–98). The answer `next_boundary` turns it, while playing, into stock's own cue (as Shift + Play, then the scene): the scene starts at the next boundary, through the queue `scene_boundary` reports as `queued`. A cued choice (Shift + Play first) and MIDI scene changes are not reported | The arranger's immediate switch: set-scene, its notice and the playback jump |
 
 Project and pattern IDs are opaque equality tokens. Lengths use pattern ticks;
 scale 1 has 480 ticks per step. Stock's pickup gives negative positions near
@@ -111,16 +112,29 @@ onsets.
 SDK's claims and actions. Each extension's `extension.json` lists those it uses.
 
 - **A claim** is an exclusive control on one key: a `label` the site shows and
-  the `key` it governs. One owner per build; two extensions with the same claim
+  the `key` it governs, optionally only on some stock `pages` (up to four)
+  and with Record `held` or `released` (`record`), and Shift `held` or
+  `released` (`shift`). A claim with `replaces` keeps its key from stock
+  whenever it fires and its owner is built in; it must name pages, so stock
+  keeps the key everywhere else, and Record (50) can be replaced only with
+  Shift held, since stock tracks Record's held state from its own key. The
+  event tells the owner which claim fired (`Control::claim`). One owner per build; two extensions with the same claim
   cannot be built together, and the site will not offer both. The owner
   recognizes its gesture itself; the shared
   [`DoubleTap`](../sdk/include/opxy/double_tap.hpp) helper handles taps, holds,
   repeats and timeouts on any key without delaying stock controls.
-  `record_double_tap` is capture's.
+  `record_double_tap` is capture's. The performance recorder's are
+  `performance_play` (Play on the arranger or song screen, pages 47 and 48),
+  `performance_stop` (Stop without Shift) and `performance_undo` (Shift + Stop
+  on those screens, in place of stock's Shift + Stop there). Stock still arms,
+  plays and stops: the owner follows stock's record arm
+  (`Context::record_armed`), reads the arrangement as a take starts, writes it
+  when it stops, and takes the last take back.
 - **An action** is permission to change stock state. The runtime grants an
   extension's actions inside its `queued_control` callback for a key it claims,
   once stock accepted the event; an action's `requires` limits that to one
-  claim, and without it any claim its holder owns grants it.
+  claim (or, as a list, to any of several), and without it any claim its
+  holder owns grants it.
   - `edit_notes` (requires `record_double_tap`) unlocks `Actions::insert_notes`
     (add beside the existing notes) and `Actions::replace_notes` (clear the
     track's notes, then add), on any instrument track whose pattern is
@@ -130,11 +144,40 @@ SDK's claims and actions. Each extension's `extension.json` lists those it uses.
     once. Replacing is refused, changing nothing, while stock is still
     recording a held note there.
   - `notify` unlocks `Actions::notify`: one short popup per callback.
+  - `read_arrangement` (requires `performance_play`) unlocks
+    `Actions::read_arrangement`: a copy of the project's 99 scene rows (each
+    track's pattern and mute, and whether the slot is used) and 14 songs (their
+    scenes in order and length), tagged with the project.
+  - `write_arrangement` (requires `performance_stop`) unlocks
+    `Actions::write_arrangement`: one planned song, while stopped, for the
+    project that was read. New scenes go into slots empty then and now, the
+    song into an empty slot, each entry naming a scene that exists or is new;
+    patterns 0-8 and mutes 0 or 2 only. Every scene present in the read gets
+    its mutes back from it, undoing what stock wrote into scenes during the
+    performance, and mutes `track_mute` still holds are dropped. Anything
+    invalid or no longer fitting changes nothing. Stock's undo cannot take it
+    back.
+    It returns `Write::done` or why it refused: `playing`, `song_taken`,
+    `scene_taken` (a slot is no longer empty), `invalid`, or `refused`.
+  - `undo_arrangement` (requires `performance_undo`) unlocks
+    `Actions::undo_arrangement`: given the same `ArrangementWrite`, while
+    stopped and if the song and its new scenes are still exactly as written
+    and no new scene is current, it puts that song slot and those scene slots
+    back as the read held them (the song first). A selected song stays
+    selected, now blank, and the sequencer is reset as when a song is chosen
+    on the song page. Mutes stay as they are; the write already restored them.
+    It returns `Undo::done` or why it refused: `playing`, `edited`,
+    `scene_in_use`, or `refused` for anything else.
+  - `stop_song` (requires `performance_play`) unlocks `Actions::stop_song`:
+    it turns stock's song playback off, as choosing a scene on the arranger
+    page does, so the current scene plays until another is chosen. Opening the
+    song page turns it back on. It returns false outside a project or with a
+    stale context.
 
   Calls outside the callback, with a stale context, or a second write or
   popup in one callback are refused.
 
-Observers cannot transform notes or suppress stock input; `track_mute` may only delay a mute to the next scene boundary.
+Observers cannot transform notes or suppress stock input; `track_mute` and `scene_select` may only delay a mute or a scene choice to the next scene boundary.
 
 ## Add an extension
 

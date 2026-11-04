@@ -1774,6 +1774,45 @@
       ]
     },
     {
+      "kind": "hook",
+      "address": "0x8c095d1a",
+      "file_offset": "0xccf56",
+      "length": 8,
+      "before": "00de588dac570000",
+      "symbol": "sdk_extensions_scene_select",
+      "call": true,
+      "service": "extensions",
+      "events": [
+        "scene_select"
+      ]
+    },
+    {
+      "kind": "hook",
+      "address": "0x8c095d22",
+      "file_offset": "0xccf5e",
+      "length": 8,
+      "before": "00de588de85e0000",
+      "symbol": "sdk_extensions_scene_switched",
+      "call": true,
+      "service": "extensions",
+      "events": [
+        "scene_select"
+      ]
+    },
+    {
+      "kind": "hook",
+      "address": "0x8c095d36",
+      "file_offset": "0xccf72",
+      "length": 8,
+      "before": "00de598dd07a0000",
+      "symbol": "sdk_extensions_scene_jump",
+      "call": true,
+      "service": "extensions",
+      "events": [
+        "scene_select"
+      ]
+    },
+    {
       "kind": "startup",
       "name": "Boot-screen version label",
       "address": "0x8c0b85dc",

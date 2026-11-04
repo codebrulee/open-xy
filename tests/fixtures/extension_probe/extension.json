@@ -1,7 +1,19 @@
 {
   "id": "probe",
   "name": "Probe",
-  "description": "SDK test extension: records the events it receives and writes notes when Record is released.",
-  "claims": ["record_double_tap"],
-  "actions": ["edit_notes", "notify"]
+  "description": "SDK test extension: records the events it receives, writes notes when Record is released, and reads and writes the arrangement.",
+  "claims": [
+    "record_double_tap",
+    "performance_play",
+    "performance_stop",
+    "performance_undo"
+  ],
+  "actions": [
+    "edit_notes",
+    "notify",
+    "read_arrangement",
+    "write_arrangement",
+    "undo_arrangement",
+    "stop_song"
+  ]
 }

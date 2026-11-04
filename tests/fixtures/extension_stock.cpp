@@ -9,10 +9,10 @@
 using namespace opxy;
 using namespace opxy::platform;
 namespace {
-u32 project_id = 1, selected = 0, input_enabled = 1, screen = 0;
+u32 project_id = 1, selected = 0, input_enabled = 1, screen = 0, page = 0;
 u32 pattern_id = 2, track_length = 16, scale = 3, quantization = 0;
 i32 position = 0;
-u32 playing = 0, counting = 0, held_record = 0, recorder_mode = 0, recorder_alt = 0;
+u32 playing = 0, counting = 0, armed = 0, held_record = 0, recorder_mode = 0, recorder_alt = 0;
 u32 other_held = 0, shift = 0;
 extensions::Time clock_time;
 alignas(4) unsigned char pattern_notes[0x788];
@@ -47,6 +47,8 @@ void forward_event(const u32* e) {
     ++event_calls;
     if (!input_enabled) return;
     if (e[0] == 50 && !consume_record && !shift) held_record = e[1] != 0;
+    if (e[0] == 50 && e[1] && !shift) armed = 0;  // a Record press disarms
+    if (e[0] == 51 && e[1] && held_record) armed = 1;  // Rec + Play arms
     if (e[0] == 51 && e[1]) playing = 1;
     if (e[0] == 52 && e[1]) playing = counting = 0;
 }
@@ -100,20 +102,37 @@ void publish(u32 t) { failed |= t != last_track; ++publishes; }
 void popup(const char* text,u32 a,u32 b,u32 duration) {
     const char expected[]="probed";
     for (u32 i=0;i<sizeof(expected);++i) failed |= text[i]!=expected[i];
-    failed |= a!=1 || b || duration!=0x3f000000u; ++popups;
+    failed |= a!=1 || b || duration!=0x40000000u; ++popups;
 }
 // Scenes and songs: stock's boundary step applies the queued scene, or else the
 // active song's next entry, each through set-scene at its own (hooked) call.
 u32 scene_now = 0, song_now = 16, song_position = 0, queued_scene = ~0u, set_calls = 0, step_calls = 0;
 const u32 song_scenes[8] = {5, 6, 7, 8, 9, 10, 11, 12};
-u32 set_scene(u32 scene, u32) { scene_now = scene; ++set_calls; return 7; }
+u32 set_copy = 0;
+u32 set_scene(u32 scene, u32 copy) { scene_now = scene; set_copy = copy; ++set_calls; return 7; }
+// The arranger page's immediate switch, after set-scene: a notice and the jump.
+u32 switch_notices = 0, jumps = 0, jumped_to = ~0u;
+u32 scene_notice(u32, u32, u32) { ++switch_notices; return 3; }
+u32 scene_jump(u32 controller, u32 scene, u32 restart) {
+    failed |= controller != 0x860c6adc || restart != 0; ++jumps; jumped_to = scene; return 4;
+}
+// Stock's 8c095cde, uncued: set-scene, notice, jump, through the hooked sites.
+void arranger_select(u32 scene) {
+    sdk_extensions_scene_select(scene, 1);
+    sdk_extensions_scene_switched(0, 0, 0);
+    sdk_extensions_scene_jump(0x860c6adc, scene, 0);
+}
 u32 get_scene() { return scene_now; }
 u32 get_song() { return song_now; }
+void song_off() { song_now |= 16; }
+u32 song_sets, sequencer_resets;
+void set_song(u32 song) { song_now = song > 13 ? 16 : song; ++song_sets; }
+void reset_sequencer(u32 controller, u32 mode) { if (controller == 0x860c6adc && !mode) ++sequencer_resets; }
 u32 boundary_step(u32 controller) {
     failed |= controller != 0x860c6adc;
     ++step_calls;
     if (queued_scene != ~0u) {
-        failed |= sdk_extensions_scene_queued(queued_scene, 1) != 7;
+        failed |= sdk_extensions_scene_queued(queued_scene, 0) != 7;  // stock's cue passes 0
         queued_scene = ~0u;
     } else if (!(song_now & 16)) {
         failed |= sdk_extensions_scene_song(song_scenes[song_position], 0) != 7;
@@ -124,7 +143,16 @@ u32 boundary_step(u32 controller) {
 // Mutes: stock's scene write and DSP message, and its mute 8d5934fc, which calls
 // both through the hooked sites as stock does.
 u32 scene_mutes[16], dsp_mutes[16], scene_mute_calls = 0, dsp_mute_calls = 0;
-u32 scene_mute(u32 t, u32 v) { failed |= t >= 16; scene_mutes[t] = v; ++scene_mute_calls; return 1; }
+// The project's scene rows and songs, at the addresses the adapter computes from
+// the project word (project_id), and stock's change markers.
+unsigned char scene_memory[99 * 33], song_memory[14 * 0x68] alignas(4);
+u32 changes = 0, changed = 0, redraws = 0;
+void redraw() { ++redraws; }
+u32 scene_mute(u32 t, u32 v) {
+    failed |= t >= 16; scene_mutes[t] = v; ++scene_mute_calls;
+    scene_memory[scene_now * 33 + 16 + t] = static_cast<unsigned char>(v);  // stock writes the current scene
+    return 1;
+}
 u32 dsp_mute(u32 t, u32 v) { failed |= t >= 16; dsp_mutes[t] = v; ++dsp_mute_calls; return 0; }
 void sequencer_mute(u32 controller, u32 t, u32 v) {
     failed |= controller != 0x860c6adc;
@@ -151,9 +179,11 @@ Address host_stock_address(Address address) {
         case 0x840a0524: return reinterpret_cast<Address>(&project_id);
         case 0x840a0534: return reinterpret_cast<Address>(&selected);
         case 0x08023c48: return reinterpret_cast<Address>(&input_enabled);
+        case 0x84039230: return reinterpret_cast<Address>(&page);
         case 0x8400b9d0: return reinterpret_cast<Address>(&screen);
         case 0x860c9b39: return reinterpret_cast<Address>(&playing);
         case 0x860c9b3a: return reinterpret_cast<Address>(&counting);
+        case 0x860c9b3b: return reinterpret_cast<Address>(&armed);
         case 0x860c9b3c: return reinterpret_cast<Address>(&held_record);
         case 0x860c072c: return reinterpret_cast<Address>(&recorder_mode);
         case 0x860c072d: return reinterpret_cast<Address>(&recorder_alt);
@@ -182,15 +212,28 @@ Address host_stock_address(Address address) {
         case 0x8d549168: return reinterpret_cast<Address>(&popup);
         case 0x8d597e10: return reinterpret_cast<Address>(&boundary_step);
         case 0x8d5857ac: return reinterpret_cast<Address>(&set_scene);
+        case 0x8d585ee8: return reinterpret_cast<Address>(&scene_notice);
+        case 0x8d597ad0: return reinterpret_cast<Address>(&scene_jump);
+        case 0x860c6adc + 0x8434: return reinterpret_cast<Address>(&queued_scene);
         case 0x8d5842cc: return reinterpret_cast<Address>(&get_scene);
+        case 0x8d584284: return reinterpret_cast<Address>(&song_off);
+        case 0x8d58586c: return reinterpret_cast<Address>(&set_song);
+        case 0x8d5919bc: return reinterpret_cast<Address>(&reset_sequencer);
         case 0x8d58426c: return reinterpret_cast<Address>(&get_song);
         case 0x8d585394: return reinterpret_cast<Address>(&scene_mute);
         case 0x8d4dc8d2: return reinterpret_cast<Address>(&dsp_mute);
         case 0x8d5934fc: return reinterpret_cast<Address>(&sequencer_mute);
+        case 0x8d55adf0: return reinterpret_cast<Address>(&redraw);
+        case 0x840a0530: return reinterpret_cast<Address>(&changes);
+        case 0x840a052c: return reinterpret_cast<Address>(&changed);
         case 0x860c9b40: return reinterpret_cast<Address>(&song_position);
     }
     static const u32 ratios[32]={3,1,2,1,4,3,1,1,3,4,1,2,1,3,1,4,1,5,1,6,1,7,1,8,1,9,1,12,1,16,1,32};
     if (address>=0x840a36e0 && address<0x840a3760) return reinterpret_cast<Address>(ratios)+(address-0x840a36e0);
+    if (address >= project_id + 0x98 && address < project_id + 0x98 + sizeof(scene_memory))
+        return reinterpret_cast<Address>(scene_memory) + (address - project_id - 0x98);
+    if (address >= project_id + 0x5401bc && address < project_id + 0x5401bc + sizeof(song_memory))
+        return reinterpret_cast<Address>(song_memory) + (address - project_id - 0x5401bc);
     __builtin_trap();
 }
 }}
@@ -199,6 +242,18 @@ using extensions::probe::seen;
 using extensions::probe::command;
 using extensions::probe::written;
 using extensions::probe::mute_answer;
+using extensions::probe::select_answer;
+using extensions::probe::arrangement_command;
+using extensions::probe::read_ok;
+using extensions::probe::stop_ok;
+using extensions::probe::write_ok;
+using extensions::probe::write_result;
+using extensions::Write;
+using extensions::probe::undo_ok;
+using extensions::probe::undo_result;
+using extensions::Undo;
+using extensions::probe::snapshot;
+using extensions::probe::plan;
 
 int main() {
     fill_pattern(0);
@@ -248,6 +303,27 @@ int main() {
     consume_record=true; key(50,true); CHECK(!seen.control.accepted); key(50,false); consume_record=false;
     input_enabled=0; key(10,true); CHECK(!seen.control.accepted); input_enabled=1;
     CHECK(!writes && !undos && !popups);
+    // Play on the arranger (47) or song screen (48) fires the probe's claim, after
+    // stock handled it: the context then shows stock's own record arm.
+    {
+        auto named = [](const char* claim, const char* name) {
+            if (!claim) return false;
+            while (*claim && *claim == *name) { ++claim; ++name; }
+            return *claim == *name;
+        };
+        page=47; key(50,true); u32 calls=event_calls; key(51,true);
+        CHECK(event_calls==calls+1 && named(seen.control.claim, "performance_play") && seen.context.record_armed);
+        key(51,false); key(50,false); playing=counting=0; sdk_extensions_stop(0x860c6adc);
+        key(50,true); CHECK(!seen.context.record_armed); key(50,false);  // Record alone disarms
+        page=48; key(51,true); CHECK(!seen.control.claim && !seen.context.record_armed);  // arranger page only
+        key(51,false); playing=counting=0; sdk_extensions_stop(0x860c6adc);
+        page=12; calls=event_calls; key(51,true);
+        CHECK(event_calls==calls+1 && !seen.control.claim);
+        key(51,false); playing=counting=0; sdk_extensions_stop(0x860c6adc);
+        page=47; input_enabled=0; key(51,true);
+        CHECK(!seen.control.accepted && !seen.control.claim);  // input off: no claim
+        key(51,false); input_enabled=1; page=0; armed=0;
+    }
 
     // A write replaces the sequence in one undo transaction and publishes once.
     fill_pattern(120);
@@ -279,7 +355,7 @@ int main() {
     CHECK(seen.boundary.song==extensions::no_song && seen.boundary.entry==0);
     // A queued scene takes over.
     queued_scene=4; sdk_extensions_scene_boundary(0x860c6adc);
-    CHECK(seen.boundaries==2 && set_calls==1 && seen.boundary.previous==2 && seen.boundary.scene==4);
+    CHECK(seen.boundaries==2 && set_calls==1 && seen.boundary.previous==2 && seen.boundary.scene==4 && set_copy==0);
     CHECK(seen.boundary.cause==SceneCause::queued && seen.boundary.song==extensions::no_song);
     // A song's entry, read before stock moves its position on.
     song_now=1; song_position=3; sdk_extensions_scene_boundary(0x860c6adc);
@@ -288,6 +364,42 @@ int main() {
     // Set-scene outside a boundary (the scene screen while stopped) is no event.
     CHECK(sdk_extensions_scene_queued(6,0)==7 && scene_now==6 && seen.boundaries==3);
     CHECK(sdk_extensions_scene_song(7,0)==7 && scene_now==7 && seen.boundaries==3);
+
+    // Arranger scene choices (Shift + 1-0) reach scene_select first. Answered now,
+    // or while stopped, stock switches at once; held while playing, the choice
+    // becomes stock's cue, and the boundary applies it.
+    using extensions::SceneTiming;
+    song_now=16; queued_scene=~0u;
+    u32 sets=set_calls;
+    arranger_select(3);
+    CHECK(seen.selects==1 && seen.select.scene==3 && scene_now==3 && set_calls==sets+1 && set_copy==1);
+    CHECK(switch_notices==1 && jumps==1 && jumped_to==3 && queued_scene==~0u);
+    select_answer=SceneTiming::next_boundary;
+    arranger_select(5);
+    CHECK(seen.selects==2 && seen.select.scene==5 && scene_now==3 && set_calls==sets+1);
+    CHECK(switch_notices==1 && jumps==1 && queued_scene==5);
+    arranger_select(6);  // a later choice replaces the cue, as stock's own does
+    CHECK(queued_scene==6 && scene_now==3 && jumps==1);
+    sdk_extensions_scene_boundary(0x860c6adc);
+    CHECK(scene_now==6 && queued_scene==~0u && seen.boundary.cause==SceneCause::queued && seen.boundary.scene==6);
+    CHECK(set_copy==1);  // a held choice clones into an empty scene, as the immediate switch does
+    // Stock's own cue (Shift + Play, then the scene) keeps its 0.
+    queued_scene=7; sdk_extensions_scene_boundary(0x860c6adc); CHECK(scene_now==7 && set_copy==0);
+    // A held choice still pending at Stop is forgotten: a later cue of it is stock's.
+    arranger_select(8); CHECK(queued_scene==8);
+    playing=counting=0; sdk_extensions_stop(0x860c6adc); play();
+    sdk_extensions_scene_boundary(0x860c6adc); CHECK(scene_now==8 && set_copy==0);
+    // After a held choice the next one is not skipped by mistake.
+    select_answer=SceneTiming::now;
+    arranger_select(2);
+    CHECK(scene_now==2 && switch_notices==2 && jumps==2 && jumped_to==2);
+    select_answer=SceneTiming::next_boundary;
+    playing=counting=0; sdk_extensions_stop(0x860c6adc);
+    arranger_select(4);  // stopped: at once
+    CHECK(scene_now==4 && switch_notices==3 && jumps==3 && queued_scene==~0u);
+    select_answer=SceneTiming::now;
+    play();
+    seen.boundaries=3;  // the mute checks below count from here
 
     // Mutes: every press reaches track_mute first. Answered now, stock acts at once.
     using extensions::MuteSource;
@@ -317,6 +429,84 @@ int main() {
     // Stopped, an answer to hold is ignored.
     sequencer_mute(0x860c6adc,2,2); CHECK(scene_mutes[2]==2 && scene_mute_calls==6);
     mute_answer=MuteTiming::now;
+
+    // The arrangement: scenes 0-2 present (scene 1 plays pattern 1 on track 0),
+    // song 0 holds two entries.
+    for (u32 s=0;s<3;++s) scene_memory[s*33+32]=1;
+    scene_memory[1*33+0]=1;
+    song_memory[0]=0; song_memory[1]=1; *reinterpret_cast<u32*>(song_memory+0x60)=2;
+    for (u32 t=0;t<16;++t) scene_memory[2*33+16+t]=0;
+    // Play reads it (the claimed key), after stock started.
+    // Play stops song playback first (song 1 was playing), so the read sees no song.
+    arrangement_command=1; scene_now=2; song_now=1;
+    page=47; play(); page=0;
+    CHECK(stop_ok && song_now==(1|16) && snapshot.current_song==extensions::no_song);
+    CHECK(read_ok && snapshot.project==1 && snapshot.scene[1].present && snapshot.scene[1].pattern[0]==1);
+    CHECK(!snapshot.scene[3].present && snapshot.song[0].length==2 && snapshot.song[0].entry[1]==1 && snapshot.song[1].length==0);
+    // The performance mutes track 4 in the current scene and track 5 in scene 0,
+    // as stock writes them into the scene records.
+    scene_memory[2*33+16+4]=2; scene_memory[0*33+16+5]=2;
+    // The plan: song 1 plays scene 0, then a new scene 3 (scene 1 with track 3 muted).
+    static extensions::SceneRow row;
+    row=snapshot.scene[1]; row.mute[3]=2;
+    static const u8 entries[]={0,3}, slots[]={3};
+    plan={&snapshot,1,entries,2,slots,&row,1};
+    const u32 calls=scene_mute_calls;
+    // Stop writes it, once, and restores the mutes: the current scene's through stock's mute.
+    key(52,true); key(52,false);
+    CHECK(write_ok && song_memory[0x68]==0 && song_memory[0x69]==3 && *reinterpret_cast<u32*>(song_memory+0x68+0x60)==2);
+    CHECK(scene_memory[3*33+32]==1 && scene_memory[3*33+0]==1 && scene_memory[3*33+16+3]==2);
+    CHECK(scene_memory[2*33+16+4]==0 && scene_mute_calls==calls+1 && dsp_mutes[4]==0);
+    CHECK(scene_memory[0*33+16+5]==0 && scene_memory[1*33+16+3]==0);
+    CHECK(changes==1 && changed==1 && redraws==1);
+    // Refused, changing nothing: the song slot is no longer empty; a new slot taken;
+    // an entry naming an empty scene; a write while playing.
+    key(52,true); key(52,false); CHECK(!write_ok && write_result==Write::song_taken && changes==1);
+    static const u8 bad_entries[]={9};
+    plan={&snapshot,2,bad_entries,1,nullptr,nullptr,0};
+    key(52,true); key(52,false); CHECK(!write_ok && write_result==Write::invalid && changes==1);
+    plan={&snapshot,2,entries,2,slots,&row,1};  // scene 3 is present now
+    key(52,true); key(52,false); CHECK(!write_ok && write_result==Write::scene_taken && changes==1);
+    static const u8 fine[]={0};
+    plan={&snapshot,2,fine,1,nullptr,nullptr,0};
+    playing=1; key(52,false); CHECK(!write_ok);  // a release grants nothing
+    // A song holding one scene other than scene 1 is taken; stock's blank song
+    // (one entry, scene 1) is not.
+    playing=counting=0;
+    *reinterpret_cast<u32*>(song_memory+2*0x68+0x60)=1; song_memory[2*0x68]=3;
+    key(52,true); key(52,false); CHECK(!write_ok && write_result==Write::song_taken && changes==1);
+    song_memory[2*0x68]=0;
+    key(52,true); key(52,false); CHECK(write_ok && changes==2 && song_memory[2*0x68]==0);
+
+    // Undo: Shift + Stop on the arranger or song screen is the probe's replacing
+    // claim, so stock never sees it; elsewhere it stays stock's, and Stop's
+    // write claim never fires with Shift held.
+    plan={&snapshot,1,entries,2,slots,&row,1};
+    shift=1; const u32 undo_calls=event_calls;
+    key(52,true); key(52,false); CHECK(event_calls==undo_calls+2 && !undo_ok && !write_ok && changes==2);
+    page=48;
+    CHECK(snapshot.current_song==extensions::no_song);
+    song_now=16; scene_now=3; key(52,true); key(52,false);
+    CHECK(!undo_ok && undo_result==Undo::scene_in_use);  // its new scene is current
+    scene_now=2; scene_memory[3*33+16+7]=2;
+    key(52,true); key(52,false); CHECK(!undo_ok && undo_result==Undo::edited && changes==2);  // the new scene changed since
+    scene_memory[3*33+16+7]=0; playing=1;
+    key(52,true); key(52,false); CHECK(!undo_ok && undo_result==Undo::playing);  // playing
+    playing=counting=0; page=47;
+    // Song 1 (the take's) selected since the take was read: undo goes ahead,
+    // then selects it again and resets the sequencer, as the song page does.
+    song_now=1;
+    key(52,true); CHECK(event_calls==undo_calls+2 && undo_ok && changes==3 && redraws==3);
+    CHECK(song_now==1 && song_sets==1 && sequencer_resets==1);
+    song_now=16;
+    key(52,false);
+    CHECK(*reinterpret_cast<u32*>(song_memory+0x68+0x60)==0 && song_memory[0x68]==snapshot.song[1].entry[0]);
+    CHECK(song_memory[0x69]==snapshot.song[1].entry[1] && scene_memory[3*33+32]==0 && scene_memory[3*33+16+3]==0);
+    CHECK(scene_memory[3*33+0]==snapshot.scene[3].pattern[0] && song_memory[2*0x68]==0);  // song 2 untouched
+    // Nothing as written is left to undo.
+    key(52,true); key(52,false); CHECK(!undo_ok && undo_result==Undo::edited && changes==3);
+    shift=0; page=0;
+    arrangement_command=0;
 
     CHECK(!failed);
     return 0;

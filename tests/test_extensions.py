@@ -47,11 +47,15 @@ class Folder:
 class Extensions(unittest.TestCase):
     def test_a_folder_declares_itself_against_the_registry(self):
         probe = extensions.extension_at(PROBE)
-        self.assertEqual((probe.id, probe.claims, probe.actions), ('probe', ('record_double_tap',), ('edit_notes', 'notify')))
+        self.assertEqual((probe.id, probe.claims, probe.actions),
+                         ('probe', ('record_double_tap', 'performance_play', 'performance_stop', 'performance_undo'),
+                          ('edit_notes', 'notify', 'read_arrangement', 'write_arrangement', 'undo_arrangement',
+                           'stop_song')))
         for changes in (
             dict(id='../probe'), dict(id='runtime'), dict(id='delete'),  # paths, SDK objects, C++ keywords
             dict(claims=[]),  # edit_notes needs its claim
             dict(claims=['shift_hold']),  # not in the registry
+            dict(claims=['record_double_tap', 'performance_stop', 'performance_undo']),  # read_arrangement needs play
             dict(actions=['edit_notes', 'edit_notes']),
             dict(extra=True), dict(origin='official'),  # origin comes from the catalog, not the folder
             dict(description='x' * 141), dict(note=''), dict(name=None),
@@ -73,6 +77,20 @@ class Extensions(unittest.TestCase):
     def test_the_registry_is_claims_and_actions_only(self):
         for mutate in (lambda d: d['claims'].update(bad={'label': ''}),
                        lambda d: d['actions'].update(other={'requires': 'missing'}),
+                       lambda d: d['actions'].update(other={'requires': []}),
+                       lambda d: d['actions'].update(other={'requires': ['record_double_tap', 'missing']}),
+                       lambda d: d['claims'].update(bad={'label': 'x', 'key': 51, 'pages': []}),
+                       lambda d: d['claims'].update(bad={'label': 'x', 'key': 51, 'pages': [47, 47]}),
+                       lambda d: d['claims'].update(bad={'label': 'x', 'key': 51, 'pages': [1, 2, 3, 4, 5]}),
+                       lambda d: d['claims'].update(bad={'label': 'x', 'key': 51, 'page': 48}),
+                       # Stock keeps a replaced key everywhere but one page, and always keeps Record.
+                       lambda d: d['claims'].update(bad={'label': 'x', 'key': 51, 'replaces': True}),
+                       lambda d: d['claims'].update(bad={'label': 'x', 'key': 50, 'pages': [48], 'replaces': True}),
+                       lambda d: d['claims'].update(bad={'label': 'x', 'key': 50, 'pages': [48], 'shift': 'released',
+                                                         'replaces': True}),
+                       lambda d: d['claims'].update(bad={'label': 'x', 'key': 51, 'shift': 'any'}),
+                       lambda d: d['claims'].update(bad={'label': 'x', 'key': 51, 'pages': [256]}),
+                       lambda d: d['claims'].update(bad={'label': 'x', 'key': 51, 'record': 'any'}),
                        lambda d: d.update(extensions=[]), lambda d: d.update(schema=2)):
             data = document(ROOT / extensions.PROFILE)
             mutate(data)
@@ -94,7 +112,7 @@ class Extensions(unittest.TestCase):
         extensions.check_profile(profile)
         self.assertEqual(extensions.events(), ['context', 'recordable_note_on', 'selected_note_off',
                                                'recording_tick', 'input_activity', 'queued_control',
-                                               'scene_boundary', 'track_mute'])
+                                               'scene_boundary', 'track_mute', 'scene_select'])
         hook = lambda p: next(x for x in p['patches'] if x.get('events'))
         for mutate in (
             lambda p: hook(p).pop('events'),
@@ -112,7 +130,10 @@ class Extensions(unittest.TestCase):
         probe = extensions.extension_at(PROBE)
         [entry] = extensions.metadata([probe], {'probe': 'personal'})
         self.assertEqual(entry['origin'], 'personal')
-        self.assertEqual(entry['claim_labels'], {'record_double_tap': 'Record double-tap'})
+        self.assertEqual(entry['claim_labels'], {'record_double_tap': 'Record double-tap',
+                                                 'performance_play': 'Play on the arranger page',
+                                                 'performance_stop': 'Stop writes a performance',
+                                                 'performance_undo': 'Shift + Stop on arranger or song screen'})
         self.assertLessEqual(len(entry['description']), extensions.TEXT_LIMITS['description'])
 
     def test_extensions_reach_a_build_through_its_collection(self):
