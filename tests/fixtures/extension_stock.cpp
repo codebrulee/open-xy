@@ -13,6 +13,7 @@ u32 project_id = 1, selected = 0, input_enabled = 1, screen = 0, page = 0;
 u32 pattern_id = 2, track_length = 16, scale = 3, quantization = 0;
 i32 position = 0;
 u32 playing = 0, counting = 0, armed = 0, held_record = 0, recorder_mode = 0, recorder_alt = 0;
+u32 armed_copy = 0, recorder_notices = 0;  // +0x3061, Play's copy of the arm; 8d59025c calls
 u32 other_held = 0, shift = 0;
 extensions::Time clock_time;
 alignas(4) unsigned char pattern_notes[0x788];
@@ -49,6 +50,7 @@ void forward_event(const u32* e) {
     if (e[0] == 50 && !consume_record && !shift) held_record = e[1] != 0;
     if (e[0] == 50 && e[1] && !shift) armed = 0;  // a Record press disarms
     if (e[0] == 51 && e[1] && held_record) armed = 1;  // Rec + Play arms
+    else if (e[0] == 51 && e[1] && !playing) armed_copy = armed;  // Play starts, recording if armed (8c092a1c)
     if (e[0] == 51 && e[1]) playing = 1;
     if (e[0] == 52 && e[1]) playing = counting = 0;
 }
@@ -128,6 +130,7 @@ void midi_select(u32 scene) {
     sdk_extensions_scene_select(scene, 0);
     sdk_extensions_scene_jump(0x860c6adc, scene, 0);
 }
+void recorder_notice(u32 recorder) { failed |= recorder != 0x860c072c; ++recorder_notices; }
 u32 get_scene() { return scene_now; }
 u32 get_song() { return song_now; }
 void song_off() { song_now |= 16; }
@@ -180,6 +183,7 @@ void release(u32 pitch=60) { sdk_extensions_live_note_off(0x860c6adc,selected,pi
 }
 
 namespace opxy { namespace platform {
+void extension_started() {}  // the overlay client (extension_overlay.cpp) is not linked here
 Address host_stock_address(Address address) {
     switch (address) {
         case 0x840a0524: return reinterpret_cast<Address>(&project_id);
@@ -190,6 +194,8 @@ Address host_stock_address(Address address) {
         case 0x860c9b39: return reinterpret_cast<Address>(&playing);
         case 0x860c9b3a: return reinterpret_cast<Address>(&counting);
         case 0x860c9b3b: return reinterpret_cast<Address>(&armed);
+        case 0x860c9b3d: return reinterpret_cast<Address>(&armed_copy);
+        case 0x8d59025c: return reinterpret_cast<Address>(&recorder_notice);
         case 0x860c9b3c: return reinterpret_cast<Address>(&held_record);
         case 0x860c072c: return reinterpret_cast<Address>(&recorder_mode);
         case 0x860c072d: return reinterpret_cast<Address>(&recorder_alt);
@@ -321,11 +327,31 @@ int main() {
         CHECK(event_calls==calls+1 && named(seen.control.claim, "performance_play") && seen.context.record_armed);
         key(51,false); key(50,false); playing=counting=0; sdk_extensions_stop(0x860c6adc);
         key(50,true); CHECK(!seen.context.record_armed); key(50,false);  // Record alone disarms
-        page=48; key(51,true); CHECK(!seen.control.claim && !seen.context.record_armed);  // arranger page only
+        page=48; key(51,true); CHECK(!seen.control.claim && seen.context.page==48);  // arranger page only
         key(51,false); playing=counting=0; sdk_extensions_stop(0x860c6adc);
         page=12; calls=event_calls; key(51,true);
         CHECK(event_calls==calls+1 && !seen.control.claim);
         key(51,false); playing=counting=0; sdk_extensions_stop(0x860c6adc);
+        // Leaving the arranger page: page_left names the Play claim that covers
+        // it and grants its actions, so the probe disarms stock's arm.
+        using extensions::probe::pages_left;
+        using extensions::probe::last_left;
+        extensions::probe::disarm_command=1;
+        page=47; sdk_extensions_controller_update(0x860c6adc, 17);
+        key(50,true); key(51,true); key(51,false); key(50,false);
+        playing=counting=0; sdk_extensions_stop(0x860c6adc); CHECK(armed);
+        armed_copy=1; u32 left_before=pages_left;
+        sdk_extensions_controller_update(0x860c6adc, 17); CHECK(pages_left==left_before);  // same page: nothing
+        page=12; sdk_extensions_controller_update(0x860c6adc, 17);
+        CHECK(pages_left==left_before+1 && last_left.page==47 && named(last_left.claim, "performance_play"));
+        CHECK(extensions::probe::disarm_ok && !(armed & 0xff) && !(armed_copy & 0xff) && recorder_notices==1);
+        // A page no claim covers: told, but no action granted.
+        page=48; sdk_extensions_controller_update(0x860c6adc, 17);
+        page=12; sdk_extensions_controller_update(0x860c6adc, 17);
+        CHECK(pages_left==left_before+3 && last_left.page==48 && named(last_left.claim, "performance_undo"));
+        page=13; sdk_extensions_controller_update(0x860c6adc, 17);
+        CHECK(pages_left==left_before+4 && last_left.page==12 && !last_left.claim && !extensions::probe::disarm_ok);
+        extensions::probe::disarm_command=0;
         page=47; input_enabled=0; key(51,true);
         CHECK(!seen.control.accepted && !seen.control.claim);  // input off: no claim
         key(51,false); input_enabled=1; page=0; armed=0;

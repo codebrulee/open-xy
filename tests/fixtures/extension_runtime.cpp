@@ -42,10 +42,19 @@ void edit_control(const extensions::Context& context, const extensions::Control&
     if (mode == 5) result += actions.insert_notes(context, track, &good, 1);
     if (mode == 7) result += actions.replace_notes(context, track, &good, 1);  // one write per callback
 }
+extensions::Indicator first_shows = extensions::Indicator::none, second_shows = extensions::Indicator::none;
+extensions::Indicator first_indicator(const extensions::Context&) { return first_shows; }
+extensions::Indicator nested = extensions::Indicator::none;
+extensions::Indicator second_indicator(const extensions::Context&) {
+    nested = extensions_indicator();  // reentrant: the last answer, no second poll
+    return second_shows;
+}
 const extensions::Hooks first = extensions::Hooks().with_recordable_note_on(first_note)
-                                                   .with_queued_control(observe_control);
+                                                   .with_queued_control(observe_control)
+                                                   .with_indicator(first_indicator);
 const extensions::Hooks second = extensions::Hooks().with_recordable_note_on(second_note)
-                                                    .with_queued_control(edit_control);
+                                                    .with_queued_control(edit_control)
+                                                    .with_indicator(second_indicator);
 // Two claims on different keys. edit_notes needs the first (or any claim once
 // set to 0); notify needs any claim its holder owns. A third, held by no one
 // until the replacing test, takes key 52 with Record held on page 48 only.
@@ -78,6 +87,10 @@ bool extension_read_arrangement(extensions::Arrangement&) { return false; }
 extensions::Write extension_write_arrangement(const extensions::ArrangementWrite&) { return extensions::Write::refused; }
 extensions::Undo extension_undo_arrangement(const extensions::ArrangementWrite&) { return extensions::Undo::refused; }
 bool extension_stop_song() { return false; }
+bool extension_disarm_record() { return false; }
+u32 extension_page() { return 0; }
+u32 started;
+void extension_started() { ++started; }
 bool extension_record_armed() { return false; }
 }}
 ClaimState state = {0, false, false};
@@ -159,5 +172,22 @@ int main() {
     control(52, false); CHECK(claimed_keys == claimed + 1 && !last_claim);  // not taken: no claim
     initialized = false; entries = nullptr; collection[1].claims = 2u;
     CHECK(!replaces(52));
+    // The indicator: none until the collection has started (which adds the
+    // overlay's client), then the strongest any extension asks for.
+    using extensions::Indicator;
+    initialized = false; entries = nullptr; started = 0;
+    first_shows = Indicator::running;
+    CHECK(extensions_indicator() == Indicator::none && started == 0);
+    extensions_recordable_note_on(0, 60, 100); CHECK(started == 1);
+    first_shows = Indicator::none;
+    CHECK(extensions_indicator() == Indicator::none);
+    first_shows = Indicator::armed;
+    CHECK(extensions_indicator() == Indicator::armed);
+    second_shows = Indicator::running;
+    CHECK(extensions_indicator() == Indicator::running);
+    first_shows = Indicator::running; second_shows = Indicator::armed;
+    CHECK(extensions_indicator() == Indicator::running && nested == Indicator::running);
+    first_shows = Indicator::none;
+    CHECK(extensions_indicator() == Indicator::armed);
     return 0;
 }

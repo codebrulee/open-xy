@@ -148,6 +148,18 @@ u32 extension_song() {
     const u32 song = stock<u32()>(0x8d58426c)();  // project +7; bit 4 set: no song
     return song & 16 ? extensions::no_song : song;
 }
+// Stock's disarm, 8d592998(controller, 0), writes the arm (+0x305f), tells the
+// recorder (8d59025c(0x860c072c)) and, disarming, calls 8d591964, the stop the
+// SDK's Stop hook wraps, which would stop a transport Play has just started.
+// Play has also already copied the arm into +0x3061, which the transport reads
+// when it starts. So this writes both bytes and sends the notice, without the stop.
+bool extension_disarm_record() {
+    if (!word(kProject)) return false;
+    *at<unsigned char>(kRecordArmed) = 0;
+    *at<unsigned char>(kRecordArmed + 2) = 0;  // +0x3061: Play's copy
+    stock<void(u32)>(0x8d59025c)(kRecorder);
+    return true;
+}
 bool extension_stop_song() {
     if (!word(kProject)) return false;
     stock<void()>(0x8d584284)();  // project +7 bit 4: song off, as an arranger scene choice sets it

@@ -99,6 +99,8 @@ only for the callback. The SDK does not sandbox native code.
 | `scene_boundary` | The playing scene's longest pattern ended and stock chose the next scene: the scene that ended and the one that starts, why (`kept`, `queued` or the active `song`), the song and, for a song, the entry that starts. Only while playing; stock's own song position has already moved on | Boundary step, its queued and song scene changes |
 | `track_mute` | A mute or unmute pressed (`keys`: Instrument or Aux + 1–8, or MIDI; `mixer`), playing or stopped, before stock applies it: the scene's mute slot (0–15) and whether it mutes. The answer `next_boundary` holds it while playing; the SDK applies held mutes after the next boundary, before `scene_boundary`, or when the transport stops. A press on a track with a held mute cancels it (`cancels_held`) | Mute's scene write and DSP message, the mixer's toggle |
 | `scene_select` | A scene chosen on the arranger page with Shift + 1–0, or by MIDI's previous, next or set scene, which stock switches to at once, playing or stopped: the scene (0–98). The answer `next_boundary` turns it, while playing, into stock's own cue (as Shift + Play, then the scene): the scene starts at the next boundary, through the queue `scene_boundary` reports as `queued`. A cued choice (Shift + Play first) and MIDI's queued scene already wait, and are not reported | The arranger's and MIDI's immediate switch: set-scene, the arranger's notice and the playback jump |
+| `indicator` | Polled about once a frame on the GUI, with the latest context: what the extension wants shown over every page, `Indicator::none`, `armed` (a record and a pause icon) or `running` (record and play), top right; when running ends the SDK shows record and stop for about two seconds. The strongest any extension asks for is shown. Keep it cheap; it takes no actions | None: the SDK's overlay asks for it |
+| `page_left` | The selected stock page changed, playing or not: the page left (`Context::page` is the one now shown), and the first of the receiver's claims limited to pages that covers it, if any. While that claim's owner handles it, the claim's actions are granted, as for its key | The controller update, which compares the selected page with the last one seen |
 
 Project and pattern IDs are opaque equality tokens. Lengths use pattern ticks;
 scale 1 has 480 ticks per step. Stock's pickup gives negative positions near
@@ -124,7 +126,7 @@ SDK's claims and actions. Each extension's `extension.json` lists those it uses.
   [`DoubleTap`](../sdk/include/opxy/double_tap.hpp) helper handles taps, holds,
   repeats and timeouts on any key without delaying stock controls.
   `record_double_tap` is capture's. The performance recorder's are
-  `performance_play` (Play on the arranger or song screen, pages 47 and 48),
+  `performance_play` (Play on the arranger page, 47),
   `performance_stop` (Stop without Shift) and `performance_undo` (Shift + Stop
   on those screens, in place of stock's Shift + Stop there). Stock still arms,
   plays and stops: the owner follows stock's record arm
@@ -173,6 +175,12 @@ SDK's claims and actions. Each extension's `extension.json` lists those it uses.
     page does, so the current scene plays until another is chosen. Opening the
     song page turns it back on. It returns false outside a project or with a
     stale context.
+  - `disarm_record` (requires `performance_play` or `performance_stop`)
+    unlocks `Actions::disarm_record`: it turns stock's record arm off, as a
+    Record press alone does, and if Play has just started the transport armed,
+    it plays without recording. The recorder calls it when its armed take is
+    cancelled: on Stop, or (through `page_left`) on leaving the arranger page.
+    It returns false outside a project or with a stale context.
 
   Calls outside the callback, with a stale context, or a second write or
   popup in one callback are refused.

@@ -14,6 +14,7 @@ const u32 action_read_arrangement = 1u << 2;
 const u32 action_write_arrangement = 1u << 3;
 const u32 action_undo_arrangement = 1u << 4;
 const u32 action_stop_song = 1u << 5;
+const u32 action_disarm_record = 1u << 6;
 
 struct ExtensionEntry {
     const char* id;
@@ -59,6 +60,9 @@ void extensions_scene_boundary(const extensions::SceneBoundary& boundary);
 bool extensions_track_mute(const extensions::TrackMute& mute);
 // True: cue the scene to the next boundary instead of switching now.
 bool extensions_scene_select(const extensions::SceneSelect& select);
+// The strongest indicator any extension asks for now (the overlay polls it each
+// frame), with the latest context; none before the collection has started.
+extensions::Indicator extensions_indicator();
 
 // An instrument track's pattern, as notes are written to it.
 struct TrackPattern { u32 pattern, length, scale; bool editable; };
@@ -81,6 +85,10 @@ bool extension_read_arrangement(extensions::Arrangement& out);
 extensions::Write extension_write_arrangement(const extensions::ArrangementWrite& write);
 extensions::Undo extension_undo_arrangement(const extensions::ArrangementWrite& write);
 bool extension_stop_song();  // set project +7 bit 4 (8d584284)
+bool extension_disarm_record();  // clear the record arm (+0x305f) and Play's copy of it (+0x3061)
+// The collection was found valid: the adapter starts what it adds beside the
+// events (the indicator's overlay client).
+void extension_started();
 u32 extension_scene();
 u32 extension_song();
 }}

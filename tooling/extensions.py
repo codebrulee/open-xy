@@ -166,8 +166,14 @@ def events():
     return re.findall(r'constexpr Hooks with_(\w+)\(', body.group(1))
 
 
+# Hooks the SDK polls from its own code, not from a firmware site: the overlay
+# asks for the indicator each frame (extension_overlay.cpp).
+POLLED = {'indicator'}
+
+
 def check_profile(profile):
-    """Every extension hook names the events it feeds, and every event has a site."""
+    """Every extension hook names the events it feeds, and every event but a polled
+    one has a site."""
     known, fed = set(events()), set()
     for patch in profile['patches']:
         if patch.get('service') == 'extensions':
@@ -178,7 +184,8 @@ def check_profile(profile):
             fed |= set(listed)
         else:
             require('events' not in patch, 'Only extension hooks name events')
-    require(fed == known, 'Events without a firmware site: ' + ', '.join(sorted(known - fed)))
+    require(not fed & POLLED, 'A polled hook has no firmware site')
+    require(fed | POLLED == known, 'Events without a firmware site: ' + ', '.join(sorted(known - fed - POLLED)))
 
 
 def required(action):

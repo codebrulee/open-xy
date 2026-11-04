@@ -12,6 +12,7 @@
     "read_arrangement": {"requires": "performance_play"},
     "write_arrangement": {"requires": "performance_stop"},
     "undo_arrangement": {"requires": "performance_undo"},
-    "stop_song": {"requires": "performance_play"}
+    "stop_song": {"requires": "performance_play"},
+    "disarm_record": {"requires": ["performance_play", "performance_stop"]}
   }
 }

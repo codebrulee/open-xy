@@ -50,7 +50,7 @@ class Extensions(unittest.TestCase):
         self.assertEqual((probe.id, probe.claims, probe.actions),
                          ('probe', ('record_double_tap', 'performance_play', 'performance_stop', 'performance_undo'),
                           ('edit_notes', 'notify', 'read_arrangement', 'write_arrangement', 'undo_arrangement',
-                           'stop_song')))
+                           'stop_song', 'disarm_record')))
         for changes in (
             dict(id='../probe'), dict(id='runtime'), dict(id='delete'),  # paths, SDK objects, C++ keywords
             dict(claims=[]),  # edit_notes needs its claim
@@ -112,7 +112,8 @@ class Extensions(unittest.TestCase):
         extensions.check_profile(profile)
         self.assertEqual(extensions.events(), ['context', 'recordable_note_on', 'selected_note_off',
                                                'recording_tick', 'input_activity', 'queued_control',
-                                               'scene_boundary', 'track_mute', 'scene_select'])
+                                               'scene_boundary', 'track_mute', 'scene_select', 'indicator',
+                                               'page_left'])
         hook = lambda p: next(x for x in p['patches'] if x.get('events'))
         for mutate in (
             lambda p: hook(p).pop('events'),
@@ -120,6 +121,7 @@ class Extensions(unittest.TestCase):
             lambda p: hook(p).update(events=[]),
             lambda p: next(x for x in p['patches'] if not x.get('service')).update(events=['context']),
             lambda p: [x.update(events=['context']) for x in p['patches'] if x.get('events')],
+            lambda p: hook(p).update(events=hook(p)['events'] + ['indicator']),  # polled: no site
         ):
             changed = copy.deepcopy(profile)
             mutate(changed)

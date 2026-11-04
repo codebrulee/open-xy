@@ -20,7 +20,9 @@ u32 command, written;
 // What Play and Stop do: 0 nothing, 1 read the arrangement on Play and write
 // `plan` on Stop, and undo `plan` on the performance_undo claim.
 u32 arrangement_command;
-bool read_ok, write_ok, undo_ok, stop_ok;
+bool read_ok, write_ok, undo_ok, stop_ok, disarm_ok;
+// Leaving a page its performance_play claim covers disarms stock's record arm while set.
+u32 disarm_command;
 Undo undo_result = Undo::refused;
 Write write_result = Write::refused;
 Arrangement snapshot;
@@ -45,6 +47,13 @@ void input_activity() { ++seen.activity; }
 void scene_boundary(const Context&, const SceneBoundary& b) { ++seen.boundaries; seen.boundary = b; }
 MuteTiming track_mute(const Context&, const TrackMute& m) { ++seen.mutes; seen.mute = m; return mute_answer; }
 SceneTiming scene_select(const Context&, const SceneSelect& s) { ++seen.selects; seen.select = s; return select_answer; }
+u32 pages_left;
+PageLeft last_left;
+void page_left(const Context& c, const PageLeft& left, const Actions& actions) {
+    ++pages_left;
+    last_left = left;
+    if (disarm_command) disarm_ok = actions.disarm_record(c);
+}
 void queued_control(const Context& c, const Control& k, const Actions& actions) {
     ++seen.controls;
     seen.control = k;
@@ -76,5 +85,6 @@ extern constexpr Hooks hooks = Hooks()
     .with_queued_control(queued_control)
     .with_scene_boundary(scene_boundary)
     .with_track_mute(track_mute)
-    .with_scene_select(scene_select);
+    .with_scene_select(scene_select)
+    .with_page_left(page_left);
 }}}

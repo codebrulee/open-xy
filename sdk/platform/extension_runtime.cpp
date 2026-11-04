@@ -48,6 +48,7 @@ bool ready() {
     entries = list;
     registry = &known;
     entry_count = count;
+    extension_started();
     return true;
 }
 
@@ -197,18 +198,56 @@ bool stop_song(const extensions::Context& expected) {
         return false;
     return extension_stop_song();
 }
+bool disarm_record(const extensions::Context& expected) {
+    if (!(transaction.granted & action_disarm_record)) return false;
+    bool playing = false;
+    const RecordingContext now = extension_context(playing);
+    if (!now.project || now.project != expected.recording.project || now.project != current.recording.project)
+        return false;
+    return extension_disarm_record();
+}
 const extensions::Actions actions = {insert_notes, notify, replace_notes, read_arrangement, write_arrangement,
-                                     undo_arrangement, stop_song};
+                                     undo_arrangement, stop_song, disarm_record};
+
+// The page left, to every page_left subscriber: actions as for a key of the
+// first of its claims limited to pages that covers the page left.
+void page_left(u32 page) {
+    dispatching = true;
+    for (u32 i = 0; i < entry_count; ++i) {
+        if (!entries[i].hooks->page_left) continue;
+        extensions::PageLeft left = {page, nullptr};
+        u32 fired = 0;
+        for (u32 c = 0; c < registry->claim_count && !fired; ++c) {
+            const ClaimSpec& claim = registry->claims[c];
+            if ((entries[i].claims & (1u << c)) && claim.page_count && on_page(claim, page)) {
+                fired = 1u << c;
+                left.claim = claim.name;
+            }
+        }
+        transaction = {granted(entries[i], fired), false, false};
+        entries[i].hooks->page_left(current, left, actions);
+        transaction = {0, false, false};
+    }
+    dispatching = false;
+}
+bool page_seen;
+u32 last_page;
 }
 
 void extensions_sync() {
     if (dispatching || !ready()) return;
     current.recording = extension_context(current.playing);
     current.record_armed = extension_record_armed();
+    current.page = extension_page();
     dispatching = true;
     for (u32 i = 0; i < entry_count; ++i)
         if (entries[i].hooks->context) entries[i].hooks->context(current);
     dispatching = false;
+    const u32 left = last_page;
+    const bool changed = page_seen && current.page != left;
+    page_seen = true;
+    last_page = current.page;
+    if (changed) page_left(left);
 }
 void extensions_input_activity() {
     if (dispatching || !ready()) return;
@@ -312,5 +351,20 @@ bool extensions_scene_select(const extensions::SceneSelect& select) {
             entries[i].hooks->scene_select(current, select) == extensions::SceneTiming::next_boundary) hold = true;
     dispatching = false;
     return hold && current.playing;
+}
+extensions::Indicator extensions_indicator() {
+    using extensions::Indicator;
+    static Indicator last = Indicator::none;
+    if (dispatching || !entries) return entries ? last : Indicator::none;
+    Indicator shown = Indicator::none;
+    dispatching = true;
+    for (u32 i = 0; i < entry_count; ++i) {
+        if (!entries[i].hooks->indicator) continue;
+        const Indicator wanted = entries[i].hooks->indicator(current);
+        if (wanted == Indicator::running || (wanted == Indicator::armed && shown == Indicator::none)) shown = wanted;
+    }
+    dispatching = false;
+    last = shown;
+    return shown;
 }
 }}

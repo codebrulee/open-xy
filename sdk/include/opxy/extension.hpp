@@ -22,7 +22,8 @@ struct RecordingContext {
 };
 // record_armed: stock's record arm (Rec + Play, or recording while playing)
 // is on; plain Play then starts the transport recording.
-struct Context { RecordingContext recording; bool playing; bool record_armed; };
+// page: the stock page selected now (the arranger is 47, the song page 48).
+struct Context { RecordingContext recording; bool playing; bool record_armed; u32 page; };
 struct Note { i32 position; u32 length; u8 pitch, velocity; };
 struct LiveNote { u32 track, pitch, velocity; i32 position; u32 collision_radius; };
 struct NoteOff { u32 track, pitch; };
@@ -175,6 +176,10 @@ struct Actions {
     // does, so the current scene plays until a scene is chosen. Opening the song
     // page turns it back on. Returns false outside a project. Needs stop_song.
     bool (*stop_song)(const Context&);
+    // Turn stock's record arm off, as a Record press alone does; if Play has
+    // just started the transport armed, it starts without recording. Returns
+    // false outside a project. Needs disarm_record.
+    bool (*disarm_record)(const Context&);
 };
 
 using OnContext = void (*)(const Context&);
@@ -186,6 +191,17 @@ using OnQueuedControl = void (*)(const Context&, const Control&, const Actions&)
 using OnSceneBoundary = void (*)(const Context&, const SceneBoundary&);
 using OnTrackMute = MuteTiming (*)(const Context&, const TrackMute&);
 using OnSceneSelect = SceneTiming (*)(const Context&, const SceneSelect&);
+// The stock page just left (Context::page is the one now shown), and the first
+// of the receiver's claims limited to pages that covers it, if any: while that
+// claim's owner handles it, its actions are granted, as for its key.
+struct PageLeft { u32 page; const char* claim; };
+using OnPageLeft = void (*)(const Context&, const PageLeft&, const Actions&);
+// What the SDK's indicator over every page shows for an extension: nothing,
+// armed (record and pause) or running (record and play), then record and stop
+// for about two seconds once running ends. The strongest any extension asks
+// for is shown, top right.
+enum class Indicator : u8 { none, armed, running };
+using OnIndicator = Indicator (*)(const Context&);
 
 // One callback per event, named for what it delivers. Each event lists its
 // firmware sites in the profile ("events"); docs/extensions.md says how to
@@ -225,42 +241,55 @@ struct Hooks {
     // not; a transform: its answer can cue it to the next scene boundary.
     OnSceneSelect scene_select;
 
+    // What this extension shows over every page while it wants to be seen: the
+    // SDK's indicator (record and pause, or record and play). Polled about
+    // once a frame on the GUI, with the latest context; keep it cheap.
+    OnIndicator indicator;
+    // The selected stock page changed, playing or not; seen at the next
+    // controller update. Actions as for a key of the claim it names.
+    OnPageLeft page_left;
+
     constexpr Hooks() : Hooks(nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr) {}
     // Every callback in order; prefer the with_ builders below.
     constexpr Hooks(OnContext a, OnRecordableNoteOn b, OnSelectedNoteOff c, OnRecordingTick d,
                     OnInputActivity e, OnQueuedControl f, OnSceneBoundary g, OnTrackMute h,
-                    OnSceneSelect i)
+                    OnSceneSelect i, OnIndicator j = nullptr, OnPageLeft k = nullptr)
         : context(a), recordable_note_on(b), selected_note_off(c), recording_tick(d),
-          input_activity(e), queued_control(f), scene_boundary(g), track_mute(h), scene_select(i) {}
+          input_activity(e), queued_control(f), scene_boundary(g), track_mute(h), scene_select(i), indicator(j),
+          page_left(k) {}
 
     constexpr Hooks with_context(OnContext f) const {
-        return Hooks(f, recordable_note_on, selected_note_off, recording_tick, input_activity, queued_control, scene_boundary, track_mute, scene_select);
+        return Hooks(f, recordable_note_on, selected_note_off, recording_tick, input_activity, queued_control, scene_boundary, track_mute, scene_select, indicator, page_left);
     }
     constexpr Hooks with_recordable_note_on(OnRecordableNoteOn f) const {
-        return Hooks(context, f, selected_note_off, recording_tick, input_activity, queued_control, scene_boundary, track_mute, scene_select);
+        return Hooks(context, f, selected_note_off, recording_tick, input_activity, queued_control, scene_boundary, track_mute, scene_select, indicator, page_left);
     }
     constexpr Hooks with_selected_note_off(OnSelectedNoteOff f) const {
-        return Hooks(context, recordable_note_on, f, recording_tick, input_activity, queued_control, scene_boundary, track_mute, scene_select);
+        return Hooks(context, recordable_note_on, f, recording_tick, input_activity, queued_control, scene_boundary, track_mute, scene_select, indicator, page_left);
     }
     constexpr Hooks with_recording_tick(OnRecordingTick f) const {
-        return Hooks(context, recordable_note_on, selected_note_off, f, input_activity, queued_control, scene_boundary, track_mute, scene_select);
+        return Hooks(context, recordable_note_on, selected_note_off, f, input_activity, queued_control, scene_boundary, track_mute, scene_select, indicator, page_left);
     }
     constexpr Hooks with_input_activity(OnInputActivity f) const {
-        return Hooks(context, recordable_note_on, selected_note_off, recording_tick, f, queued_control, scene_boundary, track_mute, scene_select);
+        return Hooks(context, recordable_note_on, selected_note_off, recording_tick, f, queued_control, scene_boundary, track_mute, scene_select, indicator, page_left);
     }
     constexpr Hooks with_queued_control(OnQueuedControl f) const {
-        return Hooks(context, recordable_note_on, selected_note_off, recording_tick, input_activity, f, scene_boundary, track_mute, scene_select);
+        return Hooks(context, recordable_note_on, selected_note_off, recording_tick, input_activity, f, scene_boundary, track_mute, scene_select, indicator, page_left);
     }
     constexpr Hooks with_scene_boundary(OnSceneBoundary f) const {
-        return Hooks(context, recordable_note_on, selected_note_off, recording_tick, input_activity, queued_control, f, track_mute, scene_select);
+        return Hooks(context, recordable_note_on, selected_note_off, recording_tick, input_activity, queued_control, f, track_mute, scene_select, indicator, page_left);
     }
     constexpr Hooks with_track_mute(OnTrackMute f) const {
-        return Hooks(context, recordable_note_on, selected_note_off, recording_tick, input_activity, queued_control,
-                     scene_boundary, f, scene_select);
+        return Hooks(context, recordable_note_on, selected_note_off, recording_tick, input_activity, queued_control, scene_boundary, f, scene_select, indicator, page_left);
     }
     constexpr Hooks with_scene_select(OnSceneSelect f) const {
-        return Hooks(context, recordable_note_on, selected_note_off, recording_tick, input_activity, queued_control,
-                     scene_boundary, track_mute, f);
+        return Hooks(context, recordable_note_on, selected_note_off, recording_tick, input_activity, queued_control, scene_boundary, track_mute, f, indicator, page_left);
+    }
+    constexpr Hooks with_indicator(OnIndicator f) const {
+        return Hooks(context, recordable_note_on, selected_note_off, recording_tick, input_activity, queued_control, scene_boundary, track_mute, scene_select, f, page_left);
+    }
+    constexpr Hooks with_page_left(OnPageLeft f) const {
+        return Hooks(context, recordable_note_on, selected_note_off, recording_tick, input_activity, queued_control, scene_boundary, track_mute, scene_select, indicator, f);
     }
 };
 }}

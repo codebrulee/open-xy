@@ -1613,7 +1613,8 @@
       "call": true,
       "service": "extensions",
       "events": [
-        "context"
+        "context",
+        "page_left"
       ]
     },
     {
