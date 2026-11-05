@@ -19,6 +19,7 @@ u32 stock_gui_role() __asm__("stock_gui_role");
 int sdk_screen_owned(u32) __asm__("sdk_screen_owned");
 u32 sdk_project_kept(void*) __asm__("sdk_project_kept");
 void sdk_project_loaded(const char*) __asm__("sdk_project_loaded");
+void sdk_overlay_startup() __asm__("sdk_overlay_startup");
 u32 sdk_sample_screen(u32) __asm__("sdk_sample_screen");
 int sdk_engine_installed(const void*) __asm__("sdk_engine_installed");
 int sdk_stock_engine_known(const void*) __asm__("sdk_stock_engine_known");
@@ -48,6 +49,7 @@ void sdk_startup_synth() {
 // is in place; a failed page skips only that engine.
 void sdk_startup_screen() {
 @SCREENS@
+    sdk_overlay_startup();  // the SDK's overlay over every page, last
 }
 
 // The stock catalog insertion ABI. An own name is admitted only with its
