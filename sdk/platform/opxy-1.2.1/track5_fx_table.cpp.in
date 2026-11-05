@@ -1,0 +1,17 @@
+// Generated: FX III's effects. Stock's send effects come from the stock catalog's
+// fx_types, then each send effect in the collection, in its order.
+#include "track5_fx.hpp"
+
+extern "C" {
+@DECLARATIONS@
+}
+
+const opxy::platform::Fx3Effect sdk_fx3_effects[] = {
+@EFFECTS@
+};
+const opxy::u32 sdk_fx3_effect_count = @COUNT@;
+const opxy::u32 sdk_fx3_records = @EFFECT_RECORDS@;
+const opxy::u32 sdk_fx3_record_bytes = @RECORD_BYTES@;
+const opxy::u32 sdk_fx3_record_count = @EFFECT_LIMIT@;
+const opxy::u32 sdk_fx3_buffer_limit = @BUFFER_LIMIT@;
+static_assert(@COUNT@ <= opxy::platform::kFx3Limit, "FX III lists at most kFx3Limit effects");

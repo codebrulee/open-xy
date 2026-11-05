@@ -44,8 +44,11 @@ version is rejected. The output differs from stock in exactly these places:
 | Diagnostic benchmark | 1 | Extends explicit command 0xc8 with the selected machines; no normal-playback callbacks added |
 | Per-voice profiling | 10 optional | Bypasses diagnostic timing in both stock voice renderers when built with profiling off |
 | Track control | 6 | Runs a synth's track control once per GUI tick, after stock's own call at that site, notes encoder edits, shows its overlays as parameter values, and keeps overlays off a parameter a step's lock holds (three lock writes) |
-| Aux tracks | 13 | Lets a track control machine take over aux track 12 (CV): its chooser on Shift + M1 (the effect list on the sends), its presets on Shift + track key, its page on M1, its parameter names on the LFO's destinations, its own LFO whichever track is selected, and CV and gate kept silent; four MTP allowlist edits show the user's aux presets |
+| Aux tracks | 9 | Lets a track control machine take over aux track 12 (CV): its presets on Shift + track key, its parameter names on the LFO's destinations, its own LFO whichever track is selected, and CV and gate kept silent; four MTP allowlist edits show the user's aux presets. Its chooser, page and controls use the shared aux controller sites |
+| Aux controller | 4 | Shift + M1, the page, keys and encoder turns on aux tracks, shared by the aux service and FX III ([aux tracks](#aux-tracks)) |
+| FX III | 9 | A third send effect on aux track 5, run from Aux 5's stage: its Input's send detent, effect list, stock FX page, saved bypass and icon ([FX III](#fx-iii)) |
 | Preset scan | 1 | Hides factory presets whose engine the build does not install ([presets](#presets)) |
+| Aux 5 stage | 1 | Gives the mixer's call of Aux 5's processor one owner, which runs the build's aux 5 effect before it and times both ([Aux 5 stage](#aux-5-stage)) |
 | Startup label | 1 | Shows `OPEN <version>-1.2.1` at boot, `<version>` from [`VERSION`](../VERSION), through the stock startup text renderer |
 | Extension events | 7 | Observes live input, stock transport and queued controls for extensions, and lets a Record double-tap owner edit notes through stock editing and undo; linked only when an extension is selected |
 | Module | 1 record | One loader block holding the linked module |
@@ -536,7 +539,17 @@ as 0..3, is the word at `0801eae4`, which `8c08f74c(controller, tab)` sets. Its
 sites are in `8c0…`, out of relative-branch range of the module, so each hook
 there replaces eight bytes with an absolute call, and a stub
 ([`aux_hooks.s`](../sdk/platform/opxy-1.2.1/aux_hooks.s)) either replays those
-bytes or leaves the stock method as its own epilogue would. No stock branch
+bytes or leaves the stock method as its own epilogue would.
+
+Four of the sites, Shift + M1 (`8c08f6ec`), the page (`8c08f540`), unshifted
+keys (`8c08fd30`) and encoder turns (`8c08fa14`), are shared with
+[FX III](#fx-iii), which is in every build, so they belong to no service: their
+stubs ([`aux_controller_hooks.s`](../sdk/platform/opxy-1.2.1/aux_controller_hooks.s))
+call [`aux_controller.cpp`](../sdk/platform/opxy-1.2.1/aux_controller.cpp),
+which asks the aux service first, through the entry points its startup
+registers (null without it), then FX III, and otherwise leaves the site to stock.
+They act on different tracks (the service on 12, FX III on 13), so at most one
+answers. No stock branch
 lands inside any of the eight bytes; the M1 handler's call at `8c08fd5a` is not
 usable for that reason (its branches share `8c08fd60`).
 
@@ -871,6 +884,69 @@ supplies only wet audio. The generated adapter exposes the machine's declared
 `dryParameter`, or returns `INT32_MAX` when none is declared, matching stock's
 absent-object fallback. This is a source-mixer control, not a wet/dry crossfade
 inside the effect. See the [effect API](api.md#effects).
+
+### FX III
+
+A third send effect on aux track 5 (track 13, stock index 12: the audio input), in
+[`track5_fx.cpp`](../sdk/platform/opxy-1.2.1/track5_fx.cpp) with its stubs in
+[`track5_aux.s`](../sdk/platform/opxy-1.2.1/track5_aux.s). Each track's aux
+send is its send level; the track's Level and Mix set the return.
+
+- **Input:** the Input encoder stores one of ten buckets, two per stock input,
+  each at its centre. Of main out's (0.8..1), 0.85 stays main out, whose case
+  leaves silence in the track's input buffer (`11b00d48`); 0.95 is send. No
+  stock reader changes.
+- **Audio:** FX III is [Aux 5's stage](#aux-5-stage) effect,
+  `sdk_track5_stage`, which runs before the track's processor (`8d50fdc0`),
+  after the mixer has summed tracks 1-8 into the aux bus. On send it runs the
+  bus through the chosen effect into the input buffer. The aux bus
+  runs 2^11 above the FX buses (measured), so the effect gets the bus `>> 11`,
+  stock's FX bus level, and its return goes back `<< 11`, saturating: linear
+  effects don't care, but dist and lofi saturate at the bus's level.
+- **The effect:** one 480-byte object, built from the effect's record
+  ([relocated table](#send-effects)) as FX II's slot 15. Its `init` asks
+  `scratch` for slot 15's memory, so while it runs the allocator's next
+  address (`84a50b90`) is moved up by the most an effect may ask for (512 KiB),
+  which FX II's own effect never reaches, then put back. A record without a
+  factory leaves the return silent.
+- **Silence gate:** after about 6 s (4096 blocks) with the bus and the return
+  below about -114 dBFS, the effect stops running until the bus carries signal.
+- **Storage:** the choice is word 7, `0x53000000` plus the effect ID, with
+  `0x100` for the bypass; words 4..6 are the effect's first three controls.
+  Stock saves all of them with the project and no stock page reaches them. A
+  word that isn't tagged, or names an effect the build lacks, means stock delay
+  with its defaults. The [project companion](projects.md) doesn't map word 7, so
+  an SDK effect's number must stay the same between builds (`--layout`).
+- **Effects:** the generated
+  [`track5_fx_table.cpp`](../sdk/platform/opxy-1.2.1/track5_fx_table.cpp.in)
+  lists the stock catalog's `fx_types`, then each send effect in the build
+  (at most 32). The GUI lists only effects whose `ready()` holds; the audio side
+  can't ask it (an effect with its own display is ready only once the GUI's pages
+  are), so it checks the record instead.
+
+| Site | Does |
+| --- | --- |
+| `8c08f624` | Shift + track key's selector leaving for a track other than a send: on send, opens the "fx III" list (stock browser) |
+| `8c08f540`, `8c08fa14`, `8c08fd30`, `8c08f6ec` | Shared [aux controller](#aux-tracks) sites: on send, M1 shows the stock FX page (21), whose encoders 1-3 edit words 4..6 and 4 the track's Level (word 41); Shift + M1 swaps it with the Input page |
+| `8d53b5ac`, `8d53b5c0`, `8d53b83e` | The FX page's parameter vector, effect ID and name, on track 13 on that page; its badge reads III |
+| `8c08f7d2` | Encoder 1's press on the Input page toggles the saved bypass instead of the input flag |
+| `8d5299a0` | The Input page shows the saved bypass |
+| `8d529730`, `8d529742`, `8d529a80` | With `aux_track.svg` artwork holding a sixth icon in `inputs` and `inputs_inactive`, shows it on send in place of main out's; with stock's five, nothing changes |
+
+## Aux 5 stage
+
+`8d51234e` is the mixer's call of Aux 5's audio processor `8d50fdc0`, once per
+block, after it has summed tracks 1-8 into the aux bus. The SDK replaces it with
+`sdk_aux5_call` ([`aux5_hooks.s`](../sdk/platform/opxy-1.2.1/aux5_hooks.s)),
+which calls two slots around the processor: an **effect**, given the
+processor's first two arguments and the aux bus (64 interleaved stereo frames,
+whose address the mixer keeps at `[SP + 0x54]`), and a **timer**, given the
+`CYCLES` count before the effect and after the processor. The processor itself
+gets the caller's arguments unchanged. Features reach this site through
+[`tooling/aux5_stage.py`](../tooling/aux5_stage.py), never with a hook of their
+own: each slot names the SDK unit that fills it, and the generated
+`aux5_stage.cpp` calls it only in builds that link that unit. An empty slot
+does nothing.
 
 ## Synthesis drum transport
 
