@@ -11,7 +11,7 @@ TEMPLATE = 'sdk/platform/opxy-1.2.1/aux5_stage.cpp.in'
 
 # An effect on the aux bus before Aux 5's processor:
 # void entry(u32 a, u32 b, const i32* bus), with the processor's R0 and R1.
-EFFECT = None
+EFFECT = ('track5_fx', 'sdk_track5_stage')  # FX III
 
 
 # A timer around the effect and the processor: void entry(u32 start, u32 end), CYCLES.

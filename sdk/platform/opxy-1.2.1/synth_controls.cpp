@@ -16,6 +16,7 @@ opxy::u32 sdk_synth_turn(opxy::u32, opxy::u32, opxy::u32, opxy::u32) __asm__("sd
 opxy::u32 sdk_effect_turn(opxy::u32, opxy::u32, opxy::u32, opxy::u32) __asm__("sdk_effect_turn");
 opxy::u32 sdk_synth_scramble(opxy::u32, opxy::u32, opxy::u32, opxy::i32) __asm__("sdk_synth_scramble");
 const char* sdk_fx_title(opxy::u32, opxy::u32) __asm__("sdk_fx_title");
+const char* sdk_track5_title(opxy::u32) __asm__("sdk_track5_title") __attribute__((weak));
 const char* sdk_synth_title(opxy::u32, opxy::u32) __asm__("sdk_synth_title");
 }
 opxy::u32 (*sdk_aux_engine)(opxy::u32) = nullptr;
@@ -353,6 +354,8 @@ u32 sdk_fx_value_text(u32 widget, const char* text, u32 index, opxy::i32 value) 
 // parameter-name callback (0x8d506c90). An owned effect's position names its
 // shown parameter; the record itself keeps naming raw slots.
 const char* sdk_fx_title(u32 effect, u32 index) {
+    if (sdk_track5_title)
+        if (const char* title = sdk_track5_title(index)) return title;
     Track* t;
     const SynthControls* m = index < opxy::page_controls ? send_effect(selected_track(), t) : nullptr;
     if (m && m->engine() == effect && m->shift && shift_held()) return index < m->shift ? m->shift_titles[index] : "";

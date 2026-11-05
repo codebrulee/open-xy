@@ -23,7 +23,7 @@ from .adapters import (aux_preset_files, catalog_entry, check_aux_presets, gener
                        generate_player_object, generate_player_table, generate_registration,
                        generate_registration_stock, generate_sample_voice,
                        generate_sample_callbacks, generate_screen, generate_screen_order,
-                       generate_synth_controls, generate_project_companion_table, generate_track_controls,
+                       generate_synth_controls, generate_project_companion_table, generate_track5_fx_table, generate_track_controls,
                        generate_voice, generate_drum_callbacks, preset_files, sample_callbacks, track_control,
                        control_callbacks)
 from .contributors import validate_source_boundary
@@ -212,10 +212,10 @@ SDK_UNITS = ('divide', 'memory', 'registration', 'registration_stock', 'startup'
              'sample_cache_hooks', 'sample_progress', 'sample_progress_stock', 'pad_assignment',
              'pad_assignment_stock', 'drum_page', 'drum_controls_stock', 'sample_slice_clock', 'drum_display_stock', 'screen_order',
              'screen_hooks', 'synth_controls', 'synth_control_table', 'note_activity', 'project_companion',
-             'project_companion_table', 'profiling', 'lfo', 'lfo_stock', 'lfo_hooks', 'aux5_stage', 'aux5_hooks', 'stock_browser',
+             'project_companion_table', 'profiling', 'lfo', 'lfo_stock', 'lfo_hooks', 'aux5_stage', 'aux5_hooks', 'track5_aux', 'track5_fx', 'track5_fx_table', 'stock_browser',
              'extension_runtime', 'extension_collection', 'extension_stock', 'track_control',
              'track_control_table', 'track_control_hooks', 'track_control_project',
-             'synth_pages', 'aux_tracks', 'aux_hooks', 'presets',
+             'synth_pages', 'aux_tracks', 'aux_hooks', 'aux_controller', 'aux_controller_hooks', 'presets',
              'master_filter_state', 'master_filter_collection', 'master_filter_stock', 'master_filter_hooks', 'master_filter_panel',
              'players', 'player_hooks', 'player_table', 'keyboard_octaves', 'sample_overview', 'sample_overview_stock',
              'drum_machines', 'drum_callbacks', 'drum_values_stock', 'drum_synthesis_stock', 'drum_hooks')
@@ -465,6 +465,8 @@ def compile_collection(directory, toolchain, compiler, profile, machines, defini
                 return cxx(str(generate_player_table(folder, machines)), obj)
             if step == 'project_companion_table':
                 return cxx(str(generate_project_companion_table(folder, machines)), obj)
+            if step == 'track5_fx_table':
+                return cxx(str(generate_track5_fx_table(folder, machines)), obj)
             if step == 'track_control_table':
                 return cxx(str(generate_track_controls(folder, machines)), obj)
             if step == 'aux5_stage':
