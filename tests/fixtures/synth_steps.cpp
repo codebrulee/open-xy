@@ -9,6 +9,8 @@
 // This fixture has no synthesis drum kits.
 const opxy::platform::DrumMachine* sdk_drum_machine(opxy::u32) { return nullptr; }
 bool sdk_drum_values(opxy::u32, opxy::u8*, opxy::u8*) { return false; }
+// FX III's send page names nothing here (track5_fx.cpp).
+const char* sdk_track5_title(opxy::u32) { return nullptr; }
 
 namespace {
 using opxy::i32;

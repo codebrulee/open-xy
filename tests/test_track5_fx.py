@@ -101,6 +101,15 @@ class FirmwareEdits(unittest.TestCase):
         services = active_services(config(), native.service_users([fixture('probesynth')]))
         self.assertTrue(all(patch_active(patches[s], services) for s in {**FX3_HOOKS, **SHARED}))
 
+    def test_fx3_symbols_are_never_weak(self):
+        # The browser builder's linker refuses weak symbols (builder/core.mjs), and
+        # FX III's units are in every build, so its callers name them plainly.
+        for path in (ROOT / 'sdk/platform/opxy-1.2.1').glob('*.cpp'):
+            text = path.read_text(encoding='utf-8')
+            for line in text.splitlines():
+                if 'sdk_track5_' in line:
+                    self.assertNotIn('weak', line, path.name)
+
     def test_fx3_runs_from_aux_5s_stage_not_a_hook_of_its_own(self):
         self.assertEqual(aux5_stage.EFFECT, ('track5_fx', 'sdk_track5_stage'))
         source = aux5_stage.render(set(native.SDK_UNITS), aux5_stage.EFFECT, aux5_stage.TIMER)
