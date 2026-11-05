@@ -49,4 +49,18 @@
     <path id="ind_alert" fill="#F91400" d="M414,211c0,2.2-1.8,4-4,4s-4-1.8-4-4s1.8-4,4-4S414,208.8,414,211z"/>
     <text id="ind_cpu" transform="matrix(1 0 0 1 420 215.5)" fill="#F91400" font-family="UniversNextPro-Light" font-size="12px">cpu</text>
   </g>
+  <g id="recorder">
+    <path fill="#000000" d="M416,4h60v26h-60z"/>
+    <path fill="#F91400" d="M438,17c0,4.4-3.6,8-8,8s-8-3.6-8-8s3.6-8,8-8S438,12.6,438,17z"/>
+    <g id="rec_armed">
+      <path fill="#CDCDCD" d="M447,9h6v16h-6z"/>
+      <path fill="#CDCDCD" d="M459,9h6v16h-6z"/>
+    </g>
+    <g id="rec_running">
+      <path fill="#CDCDCD" d="M447,8l20,9l-20,9z"/>
+    </g>
+    <g id="rec_stopped">
+      <path fill="#CDCDCD" d="M448,10h14v14h-14z"/>
+    </g>
+  </g>
 </svg>

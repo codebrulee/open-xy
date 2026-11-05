@@ -34,21 +34,43 @@ RUNTIME = 'sdk/platform/extension_runtime.hpp'
 SOURCE_SUFFIXES = ('.cpp', '.cc', '.h', '.hpp', '.inc')
 
 
+# Actions whose Actions members are named differently from the action.
+ACTION_MEMBERS = {'edit_notes': ('insert_notes', 'replace_notes')}
+
+
 def registry():
     """The claims and actions an extension may declare: SDK contracts. Claims are
-    data (a label and the key it governs); actions are one bit each in RUNTIME."""
+    data (a label, the key it governs and, optionally, the stock page it needs,
+    whether Record is held or released, and whether it keeps the key from stock);
+    actions are one bit each in RUNTIME."""
     data = document(ROOT / PROFILE)
     require(set(data) == {'schema', 'claims', 'actions'} and data['schema'] == 3, 'Invalid extension registry')
     claims, actions = data['claims'], data['actions']
     require(isinstance(claims, dict) and isinstance(actions, dict), 'Claims and actions are registries')
     require(len(claims) <= 32 and len(actions) <= 32, 'At most 32 claims and 32 actions')
     for name, claim in claims.items():
-        require(NAME.fullmatch(name) and isinstance(claim, dict) and set(claim) == {'label', 'key'} and
+        require(NAME.fullmatch(name) and isinstance(claim, dict) and
+                {'label', 'key'} <= set(claim) <= {'label', 'key', 'pages', 'record', 'shift', 'replaces'} and
                 isinstance(claim['label'], str) and 0 < len(claim['label']) <= 40 and
-                type(claim['key']) is int and 0 <= claim['key'] < 256, 'Invalid claim: ' + name)
+                type(claim['key']) is int and 0 <= claim['key'] < 256 and
+                ('pages' not in claim or (isinstance(claim['pages'], list) and 0 < len(claim['pages']) <= 4 and
+                                          len(set(claim['pages'])) == len(claim['pages']) and
+                                          all(type(p) is int and 0 <= p < 256 for p in claim['pages']))) and
+                claim.get('record', 'held') in ('held', 'released') and
+                claim.get('shift', 'held') in ('held', 'released') and
+                type(claim.get('replaces', False)) is bool, 'Invalid claim: ' + name)
+        # Stock tracks Record's held state from its own key unless Shift is held
+        # (its undo); a replaced key is scoped to a page so stock keeps it
+        # everywhere else.
+        require(not claim.get('replaces') or ('pages' in claim and (claim['key'] != 50 or claim.get('shift') == 'held')),
+                'A replacing claim needs pages, and on Record needs Shift held: ' + name)
     for name, action in actions.items():
-        require(NAME.fullmatch(name) and isinstance(action, dict) and set(action) <= {'requires'} and
-                ('requires' not in action or action['requires'] in claims), 'Invalid action: ' + name)
+        require(NAME.fullmatch(name) and isinstance(action, dict) and set(action) <= {'requires'},
+                'Invalid action: ' + name)
+        requires = action.get('requires')
+        require(requires is None or (isinstance(requires, str) and requires in claims) or (
+            isinstance(requires, list) and requires and all(isinstance(r, str) and r in claims for r in requires)),
+            'Invalid action: ' + name)
     return claims, actions
 
 
@@ -110,12 +132,24 @@ def extension_at(folder):
                 all(isinstance(v, str) and v in known for v in values),
                 f'{name}: unknown or repeated {field[:-1]}; the SDK declares them in {PROFILE} and {RUNTIME}')
     for action in data['actions']:
-        needed = actions[action].get('requires')
-        require(needed is None or needed in data['claims'], f'{name}: {action} requires the {needed} claim')
+        needed = required(actions[action])
+        require(not needed or any(c in data['claims'] for c in needed),
+                f'{name}: {action} requires a claim among: ' + ', '.join(needed))
     require(not data['actions'] or data['claims'], f'{name}: actions are granted through a claim it holds')
     for path in root.rglob('*'):
         if path.is_file() and path.suffix in SOURCE_SUFFIXES and '.git' not in path.relative_to(root).parts:
-            validate_source_boundary(path.read_text(encoding='utf-8'), f'{name}/{path.relative_to(root).as_posix()}')
+            relative = path.relative_to(root)
+            text = path.read_text(encoding='utf-8')
+            validate_source_boundary(text, f'{name}/{relative.as_posix()}')
+            # An action it calls but doesn't declare is never granted: the call
+            # fails on the device while host tests with fake actions pass.
+            if relative.parts[0] != 'tests':
+                for action in actions:
+                    if action in data['actions']:
+                        continue
+                    for member in ACTION_MEMBERS.get(action, (action,)):
+                        require(not re.search(r'(?:\.|->)\s*' + member + r'\s*\(', text),
+                                f'{name}: {relative.as_posix()} calls {member} but extension.json doesn\'t declare {action}')
     return Extension(name, root, tuple(data['claims']), tuple(data['actions']),
                      {k: data[k] for k in TEXT_LIMITS if k in data}, master_filter)
 
@@ -147,8 +181,14 @@ def events():
     return re.findall(r'constexpr Hooks with_(\w+)\(', body.group(1))
 
 
+# Hooks the SDK polls from its own code, not from a firmware site: the overlay
+# asks for the indicator each frame (extension_overlay.cpp).
+POLLED = {'indicator'}
+
+
 def check_profile(profile):
-    """Every extension hook names the events it feeds, and every event has a site."""
+    """Every extension hook names the events it feeds, and every event but a polled
+    one has a site."""
     known, fed = set(events()), set()
     for patch in profile['patches']:
         if patch.get('service') == 'extensions':
@@ -159,7 +199,22 @@ def check_profile(profile):
             fed |= set(listed)
         else:
             require('events' not in patch, 'Only extension hooks name events')
-    require(fed == known, 'Events without a firmware site: ' + ', '.join(sorted(known - fed)))
+    require(not fed & POLLED, 'A polled hook has no firmware site')
+    require(fed | POLLED == known, 'Events without a firmware site: ' + ', '.join(sorted(known - fed - POLLED)))
+
+
+def required(action):
+    """The claims an action needs, any one of which grants it ([] for any claim)."""
+    requires = action.get('requires', [])
+    return [requires] if isinstance(requires, str) else requires
+
+
+def claim_spec(name, claim):
+    held = lambda value: {'held': 'ClaimHeld::held', 'released': 'ClaimHeld::released'}.get(value, 'ClaimHeld::any')
+    pages = claim.get('pages', [])
+    return '{"%s", %du, {%s}, %du, %s, %s, %s}' % (
+        name, claim['key'], ', '.join('%du' % p for p in pages) or '0', len(pages), held(claim.get('record')),
+        held(claim.get('shift')), 'true' if claim.get('replaces') else 'false')
 
 
 def generate_collection(folder, extensions):
@@ -177,11 +232,11 @@ def generate_collection(folder, extensions):
     lines += ['namespace opxy { namespace platform {', 'namespace {',
               'ExtensionEntry collection_entries[' + str(max(1, len(extensions))) + '];',
               '// ' + ', '.join(claims) if claims else '// no claims',
-              'const u32 claim_keys[] = {' + table([str(c['key']) for c in claims.values()]) + '};',
+              'const ClaimSpec claim_specs[] = {' + table([claim_spec(n, c) for n, c in claims.items()]) + '};',
               '// ' + ', '.join(actions) if actions else '// no actions',
               'const u32 action_claims[] = {' + table(
-                  [mask(claim_bit, [a['requires']] if 'requires' in a else []) for a in actions.values()]) + '};',
-              'const ExtensionRegistry registry_tables = {claim_keys, %d, action_claims, %d};' % (
+                  [mask(claim_bit, required(a)) for a in actions.values()]) + '};',
+              'const ExtensionRegistry registry_tables = {claim_specs, %d, action_claims, %d};' % (
                   len(claims), len(actions)),
               '}',
               'const ExtensionRegistry& extension_registry() { return registry_tables; }',
