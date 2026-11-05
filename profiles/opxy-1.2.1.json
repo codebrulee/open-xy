@@ -1539,6 +1539,16 @@
     },
     {
       "kind": "hook",
+      "name": "Aux 5's stage: its effect and timer around the mixer's call of its processor",
+      "address": "0x8d51234e",
+      "file_offset": "0x1495aa",
+      "length": 4,
+      "before": "ffe339ed",
+      "symbol": "sdk_aux5_call",
+      "call": true
+    },
+    {
+      "kind": "hook",
       "name": "Shift + M1 on an aux track opens the machine chooser",
       "address": "0x8c08f6ec",
       "file_offset": "0xc6928",

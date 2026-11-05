@@ -46,6 +46,7 @@ version is rejected. The output differs from stock in exactly these places:
 | Track control | 6 | Runs a synth's track control once per GUI tick, after stock's own call at that site, notes encoder edits, shows its overlays as parameter values, and keeps overlays off a parameter a step's lock holds (three lock writes) |
 | Aux tracks | 13 | Lets a track control machine take over aux track 12 (CV): its chooser on Shift + M1 (the effect list on the sends), its presets on Shift + track key, its page on M1, its parameter names on the LFO's destinations, its own LFO whichever track is selected, and CV and gate kept silent; four MTP allowlist edits show the user's aux presets |
 | Preset scan | 1 | Hides factory presets whose engine the build does not install ([presets](#presets)) |
+| Aux 5 stage | 1 | Gives the mixer's call of Aux 5's processor one owner, which runs the build's aux 5 effect before it and times both ([Aux 5 stage](#aux-5-stage)) |
 | Startup label | 1 | Shows `OPEN <version>-1.2.1` at boot, `<version>` from [`VERSION`](../VERSION), through the stock startup text renderer |
 | Extension events | 7 | Observes live input, stock transport and queued controls for extensions, and lets a Record double-tap owner edit notes through stock editing and undo; linked only when an extension is selected |
 | Module | 1 record | One loader block holding the linked module |
@@ -862,6 +863,21 @@ supplies only wet audio. The generated adapter exposes the machine's declared
 `dryParameter`, or returns `INT32_MAX` when none is declared, matching stock's
 absent-object fallback. This is a source-mixer control, not a wet/dry crossfade
 inside the effect. See the [effect API](api.md#effects).
+
+## Aux 5 stage
+
+`8d51234e` is the mixer's call of Aux 5's audio processor `8d50fdc0`, once per
+block, after it has summed tracks 1-8 into the aux bus. The SDK replaces it with
+`sdk_aux5_call` ([`aux5_hooks.s`](../sdk/platform/opxy-1.2.1/aux5_hooks.s)),
+which calls two slots around the processor: an **effect**, given the
+processor's first two arguments and the aux bus (64 interleaved stereo frames,
+whose address the mixer keeps at `[SP + 0x54]`), and a **timer**, given the
+`CYCLES` count before the effect and after the processor. The processor itself
+gets the caller's arguments unchanged. Features reach this site through
+[`tooling/aux5_stage.py`](../tooling/aux5_stage.py), never with a hook of their
+own: each slot names the SDK unit that fills it, and the generated
+`aux5_stage.cpp` calls it only in builds that link that unit. An empty slot
+does nothing.
 
 ## Synthesis drum transport
 
