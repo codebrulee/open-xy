@@ -40,7 +40,8 @@ version is rejected. The output differs from stock in exactly these places:
 | Synth and effect controls | 8 | Lets an encoder press on an owned synth's or send effect's page select an alternate parameter, which its turns, titles and values then follow; scales fine turns on owned synth and send-effect pages; steps owned enums one choice per detent; names owned enums' choices, and an owned effect's division values on the send page; extends the track menu's scramble to an owned synth's alternates |
 | LFO destinations | 15 | Selects and modulates all declared engine parameters on owned instrument machines with five to eight parameters, using their assigned encoder icons |
 | Display note releases | 2 | Observes both stock note-off map updates while preserving their original calls |
-| Project companions | 7 | Writes a [companion](projects.md) after every project save, maps a project's machine numbers through its companion on every load, gives track control machines what they kept after every load (and nothing after a new project), and shows companions beside projects over MTP |
+| Project companions | 7 | Writes a [companion](projects.md) after every project save, maps a project's machine numbers through its companion on every load, gives track control machines what they kept after every load (and nothing after a new project) and the cpu meter its project's indicator setting, and shows companions beside projects over MTP |
+| CPU meter | 12 | Times the DSP callback, each track's synth voices and the mixer's tape, FX I, FX II and master stages, and aux 5 as [Aux 5's stage](#aux-5-stage) timer; answers the main board's poll (bridge command 0x34 tagged 0x5ec5) in the DSP board's dispatcher; adds Project > M4 > cpu through the prefs list and four voices-renderer sites. Its indicator and breakdown are the SDK's overlay, a screen in the last page slot, which no machine is given ([profiling](profiling.md#load-while-you-play)) |
 | Diagnostic benchmark | 1 | Extends explicit command 0xc8 with the selected machines; no normal-playback callbacks added |
 | Per-voice profiling | 10 optional | Bypasses diagnostic timing in both stock voice renderers when built with profiling off |
 | Track control | 6 | Runs a synth's track control once per GUI tick, after stock's own call at that site, notes encoder edits, shows its overlays as parameter values, and keeps overlays off a parameter a step's lock holds (three lock writes) |
@@ -322,6 +323,26 @@ numbers are layers. The compositor's loop advance is hooked: when the selected
 page is an owned synth's, it is painted right after slot 0, beneath stock
 overlays such as the octave indicator. Every other slot keeps its order and
 page IDs are unchanged.
+
+### The SDK's overlay
+
+The last page slot is never given to a machine (the builder and
+`sdk.py build` skip it). The SDK registers its own screen there after every
+machine's, on the GUI role, drawing `content/display/openxy_overlay.svg`, which
+every build installs ([`overlay.hpp`](../sdk/platform/opxy-1.2.1/overlay.hpp)).
+The compositor (`8d5213f4`) paints a slot that isn't the current page when its
+method table's entry +8 says so, as it does for stock's octave indicator; the
+overlay's says so while a client wants to be seen, and for one frame after,
+which hides what was shown. It takes no input, so every page keeps its keys.
+
+A client owns a group in the artwork and gives three callbacks: bind its nodes
+once the artwork loads, say whether it wants to be seen (every frame), and show
+or hide its group before drawing. SDK units list their client in
+`tooling/overlay_clients.py` and are drawn only in builds that link them; a
+service the overlay doesn't link against adds its client at run time with
+`sdk_overlay_add`. A build without the artwork file asks to paint only while
+it loads, then never again. A layout that gave the last page to a machine
+before it was reserved keeps it, and the overlay is absent.
 
 The stock SVG parser **asserts (halts) on a number with five or more decimal
 places**, and parses exponents on a separate, unverified path. Every authored
@@ -1108,9 +1129,12 @@ control's choice as a ninth to twelfth.
 
 The conditional `master_filter` service redirects these stock 1.2.1 sites.
 Eight-byte entry branches replay their exact original prologues in adapter
-trampolines before resuming stock. Four-byte call sites remain relative; the
-master audio call retains its eight-byte absolute footprint. The existing
-project save/deserialize hooks are shared, not replaced or duplicated.
+trampolines before resuming stock. Four-byte call sites remain relative. The
+existing project save/deserialize hooks are shared, not replaced or duplicated.
+The master audio call is the cpu meter's, in every build. It times
+`sdk_master_stage`, which startup defines as `sdk_master_process` when the
+build links this service and as stock's EQ otherwise. A browser selection
+without a master processor resolves `sdk_master_process` to stock's EQ.
 
 | Site | Purpose | Original bytes |
 | --- | --- | --- |
@@ -1118,7 +1142,7 @@ project save/deserialize hooks are shared, not replaced or duplicated.
 | `8c09392c` | MIX Shift buttons entry | `093200e803006160` |
 | `8c093888` | MIX encoder entry | `4360990900e80300` |
 | `8d537d04` | EQ frame entry | `00e82400e305666f` |
-| `8d511b80` | Master stereo EQ processing call | `00dea011102c0000` |
+| `8d511b80` | Master stereo EQ processing call (the cpu meter's hook, in every build) | `00dea011102c0000` |
 | `8d5b145e` | B3 parameter receiver call | `fae397eb` |
 | `8d598a3c` | Active project publication getter call | `ffe3ea5b` |
 | `8d588114` | New-project preparation entry | `00e80c15e305666f` |
