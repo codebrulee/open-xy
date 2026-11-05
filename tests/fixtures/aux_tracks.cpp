@@ -39,6 +39,7 @@ const ControlMachine sdk_control_machines[] = {
 };
 const u32 sdk_control_machine_count = 2;
 AuxService sdk_aux;
+opxy::platform::AuxController sdk_aux_controller;
 u32 (*sdk_aux_engine)(u32);
 bool (*sdk_aux_owns_page)(u32);
 void sdk_synth_queue_page_key(u32 track, u32 key) { host_key_track = track; host_key = key; }

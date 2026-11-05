@@ -12,7 +12,8 @@
 // tracks 8..15; the selected track is the byte at 840a0534 and its page tab
 // (M1..M4 as 0..3) the word at 0801eae4.
 // - Its shifted-key method (8c08f6b0) ignores Shift + M1..M4. Its Shift + M1
-//   case (8c08f6ec) is hooked (aux_hooks.s): on a track a machine can take
+//   case (8c08f6ec) is hooked (aux_controller_hooks.s, shared with FX III,
+//   which aux_controller.cpp asks after this service): on a track a machine can take
 //   over, it opens the chooser, titled "engine"; on the sends (14, 15), the
 //   effect list, as their Shift + track key does (8c08f60c), so Shift + M1
 //   chooses what runs on every aux track that has a choice.
@@ -55,6 +56,7 @@
 //   note on raises the gate (8d5b5fe0, from 8d50e95c). Both are skipped while
 //   held. When the track is taken, the audio side clears stock's held CV notes
 //   (8d5b59a0) and lowers the gate (8d5b5f78(0)) once.
+#include "aux_controller.hpp"
 #include "track_control.hpp"
 #include "stock.hpp"
 #include "stock_browser.hpp"
@@ -655,4 +657,5 @@ void sdk_aux_startup() {
     sdk_aux = AuxService{aux_engine, aux_tick, aux_kept, aux_restore, aux_forget};
     sdk_aux_engine = aux_engine;
     sdk_aux_owns_page = owns_page;
+    sdk_aux_controller = opxy::platform::AuxController{sdk_aux_shift_m1, sdk_aux_page, sdk_aux_key, sdk_aux_turn};
 }
