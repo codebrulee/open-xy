@@ -101,6 +101,7 @@ only for the callback. The SDK does not sandbox native code.
 | `scene_select` | A scene chosen on the arranger page with Shift + 1–0, or by MIDI's previous, next or set scene, which stock switches to at once, playing or stopped: the scene (0–98). The answer `next_boundary` turns it, while playing, into stock's own cue (as Shift + Play, then the scene): the scene starts at the next boundary, through the queue `scene_boundary` reports as `queued`. A cued choice (Shift + Play first) and MIDI's queued scene already wait, and are not reported | The arranger's and MIDI's immediate switch: set-scene, the arranger's notice and the playback jump |
 | `indicator` | Polled about once a frame on the GUI, with the latest context: what the extension wants shown over every page, `Indicator::none`, `armed` (a record and a pause icon) or `running` (record and play), top right; when running ends the SDK shows record and stop for about two seconds. The strongest any extension asks for is shown. Keep it cheap; it takes no actions | None: the SDK's overlay asks for it |
 | `page_left` | The selected stock page changed, playing or not: the page left (`Context::page` is the one now shown), and the first of the receiver's claims limited to pages that covers it, if any. While that claim's owner handles it, the claim's actions are granted, as for its key | The controller update, which compares the selected page with the last one seen |
+| `punch_in` | A punch-in key pressed or released, playing or not: a note on aux track 2 (track 9), from that track or Shift + a key on an instrument track. The note (the effect), velocity (0 on release), the playhead in track 9's pattern (480 ticks a step) and that pattern's length. A transform: answering `PunchRecording::skip` to a press keeps it out of stock's recorder (and its undo snapshot) while recording; the effect still plays | Stock's live note start and release (the hooks `recordable_note_on` and `selected_note_off` use), and its record call for a live note (8d595cf8) |
 
 Project and pattern IDs are opaque equality tokens. Lengths use pattern ticks;
 scale 1 has 480 ticks per step. Stock's pickup gives negative positions near
@@ -115,8 +116,9 @@ SDK's claims and actions. Each extension's `extension.json` lists those it uses.
 
 - **A claim** is an exclusive control on one key: a `label` the site shows and
   the `key` it governs, optionally only on some stock `pages` (up to four)
-  and with Record `held` or `released` (`record`), and Shift `held` or
-  `released` (`shift`). A claim with `replaces` keeps its key from stock
+  and with Record `held` or `released` (`record`; the SDK tracks Record from
+  its own key events, so it reads held with Shift down too), and Shift `held`
+  or `released` (`shift`). A claim with `replaces` keeps its key from stock
   whenever it fires and its owner is built in; it must name pages, so stock
   keeps the key everywhere else, and Record (50) can be replaced only with
   Shift held, since stock tracks Record's held state from its own key. The
@@ -126,12 +128,16 @@ SDK's claims and actions. Each extension's `extension.json` lists those it uses.
   [`DoubleTap`](../sdk/include/opxy/double_tap.hpp) helper handles taps, holds,
   repeats and timeouts on any key without delaying stock controls.
   `record_double_tap` is capture's. The performance recorder's are
-  `performance_play` (Play on the arranger or song page, 47 and 48),
-  `performance_stop` (Stop without Shift) and `performance_undo` (Shift + Stop
-  on those screens, in place of stock's Shift + Stop there). Stock still arms,
-  plays and stops: the owner follows stock's record arm
-  (`Context::record_armed`), reads the arrangement as a take starts, writes it
-  when it stops, and takes the last take back.
+  `performance_arm` (Arrange, key 4, with Record held and Shift released:
+  stock opens the arranger and the recorder arms its own take; pressing
+  Arrange again while still holding Record switches it between a new song and
+  an overdub),
+  `performance_play` (Play with Record released on the arranger, its aux view
+  or the song page: 47, 49, 48), `performance_stop` (Stop without Shift) and
+  `performance_undo` (Shift + Stop on those pages, in place of stock's Shift +
+  Stop there). Rec + Play stays stock's clip recording; the recorder reads the
+  arrangement as a take starts, writes it when it stops, and takes the last
+  take back.
 - **An action** is permission to change stock state. The runtime grants an
   extension's actions inside its `queued_control` callback for a key it claims,
   once stock accepted the event; an action's `requires` limits that to one
@@ -160,7 +166,15 @@ SDK's claims and actions. Each extension's `extension.json` lists those it uses.
     invalid or no longer fitting changes nothing. Stock's undo cannot take it
     back.
     With `ArrangementWrite::replace` it rewrites the song the read found
-    instead (an overdub), which must still hold exactly that.
+    instead (an overdub), which must still hold exactly that. With
+    `ArrangementWrite::patterns` it first adds new pattern slots on one aux
+    track (`pattern_track`, 8-15), each the track's next free slot (at most 9
+    in all): a copy of slot `from` (its length and scale), emptied as stock's
+    own add-pattern does, holding only the given notes. New scenes may name
+    them. The written song becomes the selected one, song playback left on or
+    off; nothing changes page. `Write::pattern_taken` means the track's slots changed since the plan;
+    undo removes the slots again if they are still the track's last and only the
+    write's new scenes name them.
     It returns `Write::done` or why it refused: `playing`, `song_taken`,
     `scene_taken` (a slot is no longer empty), `invalid`, or `refused`.
   - `undo_arrangement` (requires `performance_undo`) unlocks
@@ -183,6 +197,16 @@ SDK's claims and actions. Each extension's `extension.json` lists those it uses.
     it plays without recording. The recorder calls it when its armed take is
     cancelled: on Stop, or (through `page_left`) on leaving the arranger page.
     It returns false outside a project or with a stale context.
+  - `play_song` (requires `performance_play` or `performance_arm`)
+    unlocks `Actions::play_song`: song playback on for the selected song;
+    stopped, it is chosen again as the song page does, so Play starts it from
+    the top; playing, it carries on from the next boundary. Stock's "no song"
+    reads as song 1. It returns false outside a project.
+  - `read_pattern` (requires `performance_play` or `performance_stop`)
+    unlocks `Actions::read_pattern`: a copy of one pattern slot of an aux track
+    (8-15): the track's slot count, the slot's length in ticks (480 a step) and
+    its notes. It returns false for a slot the track doesn't hold, outside a
+    project or with a stale context.
   - `hold_song_end` (requires `performance_play`) unlocks
     `Actions::hold_song_end`: until the transport stops, a playing song that
     would stop at its end (song flag bit 0) keeps playing its last scene

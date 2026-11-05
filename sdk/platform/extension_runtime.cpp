@@ -139,6 +139,22 @@ bool valid_row(const extensions::SceneRow& row) {
             return false;
     return true;
 }
+// New pattern slots: on an aux track, in order, each note sane (the adapter
+// checks slots and lengths against the project).
+bool valid_patterns(const extensions::ArrangementWrite& w) {
+    if (!w.pattern_count) return true;
+    if (w.pattern_count >= arr::patterns || !w.patterns || w.pattern_track < 8 || w.pattern_track >= arr::tracks)
+        return false;
+    for (u32 i = 0; i < w.pattern_count; ++i) {
+        const extensions::PatternWrite& p = w.patterns[i];
+        if (p.slot >= arr::patterns || (i && p.slot != w.patterns[i - 1].slot + 1) || p.from >= p.slot ||
+            p.count > 120 || (p.count && !p.notes)) return false;
+        for (u32 n = 0; n < p.count; ++n)
+            if (p.notes[n].position < 0 || !p.notes[n].length || p.notes[n].pitch > 127 || !p.notes[n].velocity ||
+                p.notes[n].velocity > 127) return false;
+    }
+    return true;
+}
 extensions::Write write_arrangement(const extensions::Context& expected, const extensions::ArrangementWrite& w) {
     using extensions::Write;
     if (!(transaction.granted & action_write_arrangement) || transaction.attempted) return Write::refused;
@@ -164,6 +180,7 @@ extensions::Write write_arrangement(const extensions::Context& expected, const e
             return Write::invalid;
     for (u32 s = 0; s < arr::scenes; ++s)
         if (before->scene[s].present && !valid_row(before->scene[s])) return Write::invalid;
+    if (!valid_patterns(w)) return Write::invalid;
     transaction.attempted = true;
     return extension_write_arrangement(w);
 }
@@ -187,6 +204,7 @@ extensions::Undo undo_arrangement(const extensions::Context& expected, const ext
         if (slot >= arr::scenes || seen[slot] || before->scene[slot].present) return Undo::refused;
         seen[slot] = true;
     }
+    if (!valid_patterns(w)) return Undo::refused;
     transaction.attempted = true;
     return extension_undo_arrangement(w);
 }
@@ -206,6 +224,22 @@ bool disarm_record(const extensions::Context& expected) {
         return false;
     return extension_disarm_record();
 }
+bool read_pattern(const extensions::Context& expected, u32 track, u32 slot, extensions::PatternRead& out) {
+    if (!(transaction.granted & action_read_pattern) || track < 8 || track >= arr::tracks || slot >= 16) return false;
+    bool playing = false;
+    const RecordingContext now = extension_context(playing);
+    if (!now.project || now.project != expected.recording.project || now.project != current.recording.project)
+        return false;
+    return extension_read_pattern(track, slot, out);
+}
+bool play_song(const extensions::Context& expected) {
+    if (!(transaction.granted & action_play_song)) return false;
+    bool playing = false;
+    const RecordingContext now = extension_context(playing);
+    if (!now.project || now.project != expected.recording.project || now.project != current.recording.project)
+        return false;
+    return extension_play_song(playing);
+}
 bool hold_song_end(const extensions::Context& expected) {
     if (!(transaction.granted & action_hold_song_end)) return false;
     bool playing = false;
@@ -215,7 +249,8 @@ bool hold_song_end(const extensions::Context& expected) {
     return extension_hold_song_end();
 }
 const extensions::Actions actions = {insert_notes, notify, replace_notes, read_arrangement, write_arrangement,
-                                     undo_arrangement, stop_song, disarm_record, hold_song_end};
+                                     undo_arrangement, stop_song, disarm_record, hold_song_end,
+                                     read_pattern, play_song};
 
 // The page left, to every page_left subscriber: actions as for a key of the
 // first of its claims limited to pages that covers the page left.
@@ -374,5 +409,17 @@ extensions::Indicator extensions_indicator() {
     dispatching = false;
     last = shown;
     return shown;
+}
+bool extensions_punch_in(const extensions::PunchIn& punch) {
+    if (dispatching) return false;
+    extensions_sync();
+    if (!entries) return false;
+    bool skip = false;
+    dispatching = true;
+    for (u32 i = 0; i < entry_count; ++i)
+        if (entries[i].hooks->punch_in &&
+            entries[i].hooks->punch_in(current, punch) == extensions::PunchRecording::skip) skip = true;
+    dispatching = false;
+    return skip && punch.pressed;
 }
 }}

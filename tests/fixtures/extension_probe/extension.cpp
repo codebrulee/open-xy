@@ -4,7 +4,7 @@
 // reads what it saw. It is a test fixture, not a shipped extension.
 namespace opxy { namespace extensions { namespace probe {
 struct Seen {
-    u32 contexts, notes_on, notes_off, ticks, activity, controls, boundaries, mutes, selects;
+    u32 contexts, notes_on, notes_off, ticks, activity, controls, boundaries, mutes, selects, punches;
     Context context;
     LiveNote note;
     NoteOff off;
@@ -13,6 +13,7 @@ struct Seen {
     SceneBoundary boundary;
     TrackMute mute;
     SceneSelect select;
+    PunchIn punch;
 };
 Seen seen;
 // What an accepted Record release does: 0 nothing, 1 replace, 2 insert, 3 replace track 3.
@@ -23,6 +24,13 @@ u32 arrangement_command;
 bool read_ok, write_ok, undo_ok, stop_ok, disarm_ok, hold_ok;
 // Play asks for hold_song_end while set.
 u32 hold_command;
+// Play turns the selected song's playback on while set.
+u32 song_command;
+bool song_ok;
+// Play reads track 9's pattern slot 0 while set.
+u32 pattern_command;
+bool pattern_ok;
+PatternRead pattern_seen;
 // Leaving a page its performance_play claim covers disarms stock's record arm while set.
 u32 disarm_command;
 Undo undo_result = Undo::refused;
@@ -49,6 +57,9 @@ void input_activity() { ++seen.activity; }
 void scene_boundary(const Context&, const SceneBoundary& b) { ++seen.boundaries; seen.boundary = b; }
 MuteTiming track_mute(const Context&, const TrackMute& m) { ++seen.mutes; seen.mute = m; return mute_answer; }
 SceneTiming scene_select(const Context&, const SceneSelect& s) { ++seen.selects; seen.select = s; return select_answer; }
+// The probe's answer to every punch_in.
+PunchRecording punch_answer = PunchRecording::stock;
+PunchRecording punch_in(const Context&, const PunchIn& p) { ++seen.punches; seen.punch = p; return punch_answer; }
 u32 pages_left;
 PageLeft last_left;
 void page_left(const Context& c, const PageLeft& left, const Actions& actions) {
@@ -60,6 +71,8 @@ void queued_control(const Context& c, const Control& k, const Actions& actions) 
     ++seen.controls;
     seen.control = k;
     if (hold_command && k.pressed && k.key == keys::play) hold_ok = actions.hold_song_end(c);
+    if (pattern_command && k.pressed && k.key == keys::play) pattern_ok = actions.read_pattern(c, 9, 0, pattern_seen);
+    if (song_command && k.pressed && k.claim) song_ok = actions.play_song(c);
     if (arrangement_command && k.pressed && k.key == keys::play) {
         stop_ok = actions.stop_song(c);
         read_ok = actions.read_arrangement(c, snapshot);
@@ -89,5 +102,6 @@ extern constexpr Hooks hooks = Hooks()
     .with_scene_boundary(scene_boundary)
     .with_track_mute(track_mute)
     .with_scene_select(scene_select)
-    .with_page_left(page_left);
+    .with_page_left(page_left)
+    .with_punch_in(punch_in);
 }}}

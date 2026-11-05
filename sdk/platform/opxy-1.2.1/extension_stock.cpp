@@ -23,6 +23,7 @@ opxy::u32 sdk_extensions_mute_keys(opxy::u32, opxy::u32) __asm__("sdk_extensions
 opxy::u32 sdk_extensions_mute_dsp(opxy::u32, opxy::u32) __asm__("sdk_extensions_mute_dsp");
 opxy::u32 sdk_extensions_mute_mixer(opxy::u32, opxy::u32) __asm__("sdk_extensions_mute_mixer");
 opxy::u32 sdk_extensions_scene_select(opxy::u32, opxy::u32) __asm__("sdk_extensions_scene_select");
+opxy::u32 sdk_extensions_punch_record(opxy::u32, opxy::u32, opxy::u32, opxy::u32) __asm__("sdk_extensions_punch_record");
 opxy::u32 sdk_extensions_scene_switched(opxy::u32, opxy::u32, opxy::u32) __asm__("sdk_extensions_scene_switched");
 opxy::u32 sdk_extensions_scene_jump(opxy::u32, opxy::u32, opxy::u32) __asm__("sdk_extensions_scene_jump");
 }
@@ -32,8 +33,13 @@ namespace {
 // and the copy flag its immediate switch would have passed to set-scene.
 const opxy::u32 no_held_scene = ~0u;
 opxy::u32 held_scene = no_held_scene, held_copy = 0;
+// Record held, from its own key events.
+bool record_down = false;
 // hold_song_end, until Stop.
 bool holding_song_end = false;
+// A punch-in press a subscriber keeps out of stock's recorder, during its note start.
+bool skipping_punch = false;
+const opxy::u32 kPunchTrack = 9;  // aux track 2
 }
 namespace opxy { namespace platform {
 namespace {
@@ -155,6 +161,23 @@ u32 extension_song() {
 // SDK's Stop hook wraps, which would stop a transport Play has just started.
 // Play has also already copied the arm into +0x3061, which the transport reads
 // when it starts. So this writes both bytes and sends the notice, without the stop.
+// Project +7: the selected song (0-13, 16 none), bit 4 set while song playback
+// is off; so 16 is also song 1 with playback off, and is taken as that. Stopped, choosing it again as the song page does (8d58586c, then the
+// sequencer reset 8d5919bc) plays it from its start; playing, clearing bit 4
+// (8d5842a0) lets the next boundary carry on in it.
+bool extension_play_song(bool playing) {
+    const u32 project = word(kProject);
+    if (!project) return false;
+    const u32 song = *at<unsigned char>(project + 7) & ~16u;
+    if (song >= extensions::arrangement::songs) return false;
+    if (playing) {
+        stock<void()>(0x8d5842a0)();
+    } else {
+        stock<void(u32)>(0x8d58586c)(song);
+        stock<void(u32, u32)>(0x8d5919bc)(kController, 0);
+    }
+    return true;
+}
 bool extension_hold_song_end() {
     if (!word(kProject)) return false;
     holding_song_end = true;
@@ -239,8 +262,12 @@ void sdk_extensions_live_note_on(u32 controller, u32 track, u32 note, u32 a3, u3
     extensions_input_activity();
     const LiveInput previous = live_input;
     live_input = {track, note, velocity, flags, true};
+    if (track == kPunchTrack)
+        skipping_punch = extensions_punch_in({note, velocity, true, extension_position(track),
+                                              480u * stock<u32(u32)>(0x8d586800)(track)});
     stock<void(u32,u32,u32,u32,u32,u32,u32,u32,u32,u32,u32,const void*)>(0x8d595738)
         (controller,track,note,a3,a4,velocity,a6,a7,low,high,flags,event);
+    skipping_punch = false;
     live_input = previous;
 }
 void sdk_extensions_note_accepted(u32 track, u32 note) {
@@ -251,9 +278,19 @@ void sdk_extensions_note_accepted(u32 track, u32 note) {
         (live_input.flags & 1) && !stock<u32()>(0x8d5b7e34)())
         extensions_recordable_note_on(track, note, live_input.velocity);
 }
+// Stock's note start records a live note while recording or armed through
+// 8d593c9c(controller, note, track, velocity) (8d595cf8): its undo snapshot
+// (8d593c18) and the insert (8d590902). A punch-in press a subscriber skips
+// isn't recorded; the note still plays (the path continues at 8d595882).
+u32 sdk_extensions_punch_record(u32 controller, u32 note, u32 track, u32 velocity) {
+    if (skipping_punch && track == kPunchTrack) return 0;
+    return stock<u32(u32, u32, u32, u32)>(0x8d593c9c)(controller, note, track, velocity);
+}
 void sdk_extensions_live_note_off(u32 controller, u32 track, u32 note, u32 a3, u32 flags,
                          const void* event) {
     extensions_selected_note_off(track, note);
+    if (track == kPunchTrack)
+        extensions_punch_in({note, 0, false, extension_position(track), 480u * stock<u32(u32)>(0x8d586800)(track)});
     stock<void(u32,u32,u32,u32,u32,const void*)>(0x8d595420)(controller,track,note,a3,flags,event);
 }
 void sdk_extensions_key(const u32* event) {
@@ -261,7 +298,9 @@ void sdk_extensions_key(const u32* event) {
     extensions::Control control = {event[0], event[1] != 0, false, unmodified(event[0]), 0, nullptr};
     const bool was_held = extension_record_held();
     const bool enabled = byte(kInputEnabled) != 0;
-    const ClaimState state = {extension_page(), was_held, shift_held()};
+    // Claims read Record as held from its own key events: stock stops tracking it
+    // while Shift is held (Shift + Record is its undo).
+    const ClaimState state = {extension_page(), record_down, shift_held()};
     // The clock writes a full 64-bit microsecond value through its argument.
     stock<void(extensions::Time*)>(0x8d5be3a0)(&control.time);
     // A replacing claim keeps the key from stock. Record reaches stock unless
@@ -274,6 +313,7 @@ void sdk_extensions_key(const u32* event) {
     control.accepted = enabled && (replaced || control.key != extensions::keys::record ||
         (control.pressed ? extension_record_held() : was_held && !extension_record_held()));
     extensions_queued_control(control, state);
+    if (control.key == extensions::keys::record) record_down = control.pressed;
 }
 u32 sdk_extensions_key_queue(const u32* event) {
     sdk_extensions_key(event);
@@ -411,6 +451,34 @@ unsigned char* scene_byte(u32 project, u32 scene, u32 offset) {
     return project_byte(project, kScenes + scene * kSceneBytes + offset);
 }
 u32* song_length(u32 project, u32 song) { return at<u32>(project + kSongs + song * kSongBytes + kSongLength); }
+// Pattern slots: track t's are at project +0xd7c + t * 0x53f44, 0x53f4 bytes
+// each (length in steps at +0, scale at +8, notes at +0x457c), and the count of
+// slots in use is the word at the track's +0x53f40 (8d587b3c refuses at 16).
+const u32 kTrackPatterns = 0xd7c, kTrackBytes = 0x53f44, kSlotBytes = 0x53f4, kSlotCount = 0x53f40;
+const u32 kSlotNotes = 0x457c, kSlotFlags = 0x14;
+unsigned char* pattern_slot(u32 project, u32 track, u32 slot) {
+    return project_byte(project, kTrackPatterns + track * kTrackBytes + slot * kSlotBytes);
+}
+u32* slot_count(u32 project, u32 track) { return at<u32>(project + kTrackPatterns + track * kTrackBytes + kSlotCount); }
+}
+
+bool extension_read_pattern(u32 track, u32 slot, extensions::PatternRead& out) {
+    const u32 project = word(kProject);
+    if (!project || track >= arr::tracks) return false;
+    const u32 slots = *slot_count(project, track);
+    if (slot >= slots || slots > 16) return false;
+    unsigned char* base = pattern_slot(project, track, slot);
+    const auto& list = *reinterpret_cast<const notes::Container*>(base + kSlotNotes);
+    bool used[notes::capacity];
+    if (!notes::valid(list, used)) return false;
+    out.slots = slots;
+    out.length = 480u * base[0];
+    out.count = 0;
+    for (i32 i = list.head; i != -1 && out.count < notes::capacity; i = list.slots[i].next) {
+        const notes::Note& n = list.slots[i].note;
+        out.note[out.count++] = {n.position, n.length, n.pitch, n.velocity};
+    }
+    return true;
 }
 
 bool extension_read_arrangement(extensions::Arrangement& out) {
@@ -448,6 +516,19 @@ extensions::Write extension_write_arrangement(const extensions::ArrangementWrite
     }
     for (u32 i = 0; i < w.new_count; ++i)
         if (*scene_byte(project, w.new_slots[i], 2 * arr::tracks)) return Write::scene_taken;
+    // New pattern slots follow the track's last one, copy an existing one, and
+    // hold notes within its length.
+    const u32 slots_before = w.pattern_count ? *slot_count(project, w.pattern_track) : 0;
+    if (w.pattern_count) {
+        if (slots_before > arr::patterns || w.patterns[0].slot != slots_before) return Write::pattern_taken;
+        for (u32 i = 0; i < w.pattern_count; ++i) {
+            const extensions::PatternWrite& p = w.patterns[i];
+            const u32 length = 480u * *pattern_slot(project, w.pattern_track, p.from);
+            if (p.from >= slots_before || !length) return Write::invalid;
+            for (u32 n = 0; n < p.count; ++n)
+                if (static_cast<u32>(p.notes[n].position) >= length || p.notes[n].length > length) return Write::invalid;
+        }
+    }
     // Held mutes would land after the write; the write replaces them.
     for (HeldMute& h : held_mutes) h.set = false;
     skip_dsp_mute = false;
@@ -468,6 +549,25 @@ extensions::Write extension_write_arrangement(const extensions::ArrangementWrite
             }
         }
     }
+    // The new pattern slots, before the scenes that name them: a copy of slot
+    // `from` (its length and scale), emptied as stock's add-pattern does
+    // (8d587a88), the notes inserted, and the count raised last.
+    if (w.pattern_count) {
+        const i32 radius = extension_collision_radius(w.pattern_track);
+        for (u32 i = 0; i < w.pattern_count; ++i) {
+            const extensions::PatternWrite& p = w.patterns[i];
+            unsigned char* slot = pattern_slot(project, w.pattern_track, p.slot);
+            __builtin_memcpy(slot, pattern_slot(project, w.pattern_track, p.from), kSlotBytes);
+            stock<void(void*)>(0x8d587a88)(slot);
+            for (u32 n = 0; n < p.count; ++n) {
+                const PatternNote payload = {p.notes[n].position, p.notes[n].length, p.notes[n].pitch,
+                                             p.notes[n].velocity, 0, 0};
+                stock<Wide(void*, const PatternNote*, i32)>(0x8d58f24c)(slot + kSlotNotes, &payload, radius < 0 ? 0 : radius);
+            }
+            slot[kSlotFlags] &= static_cast<unsigned char>(~8u);  // published, as 8d587668 leaves a pattern
+        }
+        *slot_count(project, w.pattern_track) = slots_before + w.pattern_count;
+    }
     for (u32 i = 0; i < w.new_count; ++i) {
         const extensions::SceneRow& row = w.new_scenes[i];
         for (u32 t = 0; t < arr::tracks; ++t) {
@@ -478,9 +578,12 @@ extensions::Write extension_write_arrangement(const extensions::ArrangementWrite
     }
     for (u32 e = 0; e < w.length; ++e) *project_byte(project, kSongs + w.song * kSongBytes + e) = w.entries[e];
     *song_length(project, w.song) = w.length;  // last: the song exists only once whole
+    // The written song becomes the selected one, song playback on or off as it
+    // was, so the song page shows it; nothing changes page.
+    unsigned char& selected = *project_byte(project, 7);
+    selected = static_cast<unsigned char>((selected & 16u) | w.song);
     *at<u32>(kChanges) += 1;
     *at<unsigned char>(kChanged) = 1;
-    stock<void()>(0x8d55adf0)();  // the pattern screen redraws, as after a MIDI scene change
     return Write::done;
 }
 
@@ -504,6 +607,17 @@ extensions::Undo extension_undo_arrangement(const extensions::ArrangementWrite& 
     const u32 current = extension_scene();
     for (u32 i = 0; i < w.new_count; ++i)
         if (w.new_slots[i] == current) return Undo::scene_in_use;
+    // New pattern slots are still the track's last, and only new scenes name them.
+    if (w.pattern_count) {
+        const u32 first = w.patterns[0].slot;
+        if (*slot_count(project, w.pattern_track) != first + w.pattern_count) return Undo::edited;
+        for (u32 s = 0; s < arr::scenes; ++s) {
+            bool fresh = false;
+            for (u32 i = 0; i < w.new_count; ++i) fresh |= w.new_slots[i] == s;
+            if (!fresh && *scene_byte(project, s, 2 * arr::tracks) && *scene_byte(project, s, w.pattern_track) >= first)
+                return Undo::edited;
+        }
+    }
     // The reverse of the write: the song goes first (its length, then entries),
     // so it never names a scene that has gone.
     const extensions::SongRow& song = w.before->song[w.song];
@@ -517,6 +631,7 @@ extensions::Undo extension_undo_arrangement(const extensions::ArrangementWrite& 
         }
         *scene_byte(project, w.new_slots[i], 2 * arr::tracks) = row.present ? 1 : 0;
     }
+    if (w.pattern_count) *slot_count(project, w.pattern_track) = w.patterns[0].slot;  // no scene names them now
     if (extension_song() == w.song) {
         // As the song page's song choice (8c0afc78): select it, then reset the
         // sequencer, so nothing still plays the entries just removed.
@@ -525,7 +640,6 @@ extensions::Undo extension_undo_arrangement(const extensions::ArrangementWrite& 
     }
     *at<u32>(kChanges) += 1;
     *at<unsigned char>(kChanged) = 1;
-    stock<void()>(0x8d55adf0)();
     return Undo::done;
 }
 }}

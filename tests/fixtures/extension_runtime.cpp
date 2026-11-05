@@ -89,6 +89,8 @@ extensions::Undo extension_undo_arrangement(const extensions::ArrangementWrite&)
 bool extension_stop_song() { return false; }
 bool extension_disarm_record() { return false; }
 bool extension_hold_song_end() { return false; }
+bool extension_read_pattern(u32, u32, extensions::PatternRead&) { return false; }
+bool extension_play_song(bool) { return false; }
 u32 extension_page() { return 0; }
 u32 started;
 void extension_started() { ++started; }

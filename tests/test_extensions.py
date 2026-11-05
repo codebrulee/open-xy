@@ -48,9 +48,10 @@ class Extensions(unittest.TestCase):
     def test_a_folder_declares_itself_against_the_registry(self):
         probe = extensions.extension_at(PROBE)
         self.assertEqual((probe.id, probe.claims, probe.actions),
-                         ('probe', ('record_double_tap', 'performance_play', 'performance_stop', 'performance_undo'),
+                         ('probe', ('record_double_tap', 'performance_play', 'performance_stop', 'performance_undo',
+                                    'performance_arm'),
                           ('edit_notes', 'notify', 'read_arrangement', 'write_arrangement', 'undo_arrangement',
-                           'stop_song', 'disarm_record', 'hold_song_end')))
+                           'stop_song', 'disarm_record', 'hold_song_end', 'read_pattern', 'play_song')))
         for changes in (
             dict(id='../probe'), dict(id='runtime'), dict(id='delete'),  # paths, SDK objects, C++ keywords
             dict(claims=[]),  # edit_notes needs its claim
@@ -64,6 +65,22 @@ class Extensions(unittest.TestCase):
                 extensions.extension_at(folder.declare(**changes))
         with Folder() as folder, self.assertRaisesRegex(ValueError, 'conditional compilation'):
             (folder.root / 'extension.cpp').write_text('#ifdef X\n#endif\n', encoding='utf-8')
+            extensions.extension_at(folder.root)
+        # Calling an action it doesn't declare (never granted on the device) is refused;
+        # tests may call fakes of any.
+        with Folder() as folder, self.assertRaisesRegex(ValueError, "calls hold_song_end but extension.json doesn't"):
+            folder.declare(actions=['notify'], claims=['record_double_tap'])
+            (folder.root / 'extension.cpp').write_text('void f(const A& a) { a.hold_song_end(c); }\n', encoding='utf-8')
+            extensions.extension_at(folder.root)
+        with Folder() as folder, self.assertRaisesRegex(ValueError, 'calls replace_notes'):
+            folder.declare(actions=['notify'], claims=['record_double_tap'])
+            (folder.root / 'extension.cpp').write_text('void f(A* a) { a->replace_notes(c, 0, n, 1); }\n', encoding='utf-8')
+            extensions.extension_at(folder.root)
+        with Folder() as folder:
+            folder.declare(actions=['notify'], claims=['record_double_tap'])
+            (folder.root / 'extension.cpp').write_text('void f() {}\n', encoding='utf-8')
+            (folder.root / 'tests').mkdir(exist_ok=True)
+            (folder.root / 'tests' / 'fake.cpp').write_text('void f(A& a) { a.hold_song_end(c); }\n', encoding='utf-8')
             extensions.extension_at(folder.root)
 
     def test_a_collection_holds_each_extension_and_claim_once(self):
@@ -113,7 +130,7 @@ class Extensions(unittest.TestCase):
         self.assertEqual(extensions.events(), ['context', 'recordable_note_on', 'selected_note_off',
                                                'recording_tick', 'input_activity', 'queued_control',
                                                'scene_boundary', 'track_mute', 'scene_select', 'indicator',
-                                               'page_left'])
+                                               'page_left', 'punch_in'])
         hook = lambda p: next(x for x in p['patches'] if x.get('events'))
         for mutate in (
             lambda p: hook(p).pop('events'),
@@ -135,7 +152,8 @@ class Extensions(unittest.TestCase):
         self.assertEqual(entry['claim_labels'], {'record_double_tap': 'Record double-tap',
                                                  'performance_play': 'Play on the arranger or song page',
                                                  'performance_stop': 'Stop writes a performance',
-                                                 'performance_undo': 'Shift + Stop on arranger or song screen'})
+                                                 'performance_undo': 'Shift + Stop on arranger or song screen',
+                                                 'performance_arm': 'Hold Record, press Arrange'})
         self.assertLessEqual(len(entry['description']), extensions.TEXT_LIMITS['description'])
 
     def test_extensions_reach_a_build_through_its_collection(self):

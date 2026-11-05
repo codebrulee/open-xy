@@ -1641,7 +1641,8 @@
       "service": "extensions",
       "events": [
         "input_activity",
-        "recordable_note_on"
+        "recordable_note_on",
+        "punch_in"
       ]
     },
     {
@@ -1654,7 +1655,8 @@
       "call": true,
       "service": "extensions",
       "events": [
-        "selected_note_off"
+        "selected_note_off",
+        "punch_in"
       ]
     },
     {
@@ -1694,6 +1696,19 @@
       "service": "extensions",
       "events": [
         "recordable_note_on"
+      ]
+    },
+    {
+      "kind": "hook",
+      "address": "0x8d595cf8",
+      "file_offset": "0x1ccf54",
+      "length": 4,
+      "before": "ffe3d2ef",
+      "symbol": "sdk_extensions_punch_record",
+      "call": true,
+      "service": "extensions",
+      "events": [
+        "punch_in"
       ]
     },
     {

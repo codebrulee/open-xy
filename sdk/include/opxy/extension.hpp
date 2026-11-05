@@ -76,7 +76,7 @@ struct SceneSelect {
 // boundary, as Shift + Play then the scene would. Stopped, switches are at once.
 enum class SceneTiming : u8 { now, next_boundary };
 // Key numbers as stock reports them in queued controls.
-namespace keys { const u32 record = 50, play = 51, stop = 52; }
+namespace keys { const u32 arrange = 4, record = 50, play = 51, stop = 52; }
 struct Control {
     u32 key;
     bool pressed;
@@ -124,6 +124,7 @@ enum class Write : u8 {
     song_taken,    // the song slot is not empty
     scene_taken,   // a new scene's slot is not empty
     invalid,       // the plan breaks a rule (a row, an entry, a length)
+    pattern_taken, // a new pattern's slot is no longer the track's next free one
 };
 // What undo_arrangement did.
 enum class Undo : u8 {
@@ -132,6 +133,21 @@ enum class Undo : u8 {
     playing,       // the transport is running
     edited,        // the song or a new scene no longer holds what was written
     scene_in_use,  // a new scene is the current scene
+};
+// One pattern slot's notes, as read_pattern copies them: the slots the track
+// holds, the slot's length in ticks (480 a step) and its notes.
+struct PatternRead {
+    u32 slots;
+    u32 length;
+    u32 count;
+    Note note[120];
+};
+// A new pattern slot: `slot` is the track's next free one, a copy of slot `from`
+// (its length and scale) holding only these notes (positions 0 to length-1).
+struct PatternWrite {
+    u8 slot, from;
+    const Note* notes;
+    u32 count;
 };
 // One planned song, written whole or not at all, while stopped. New scenes go
 // into slots empty in `before` and still empty now; the song into a slot
@@ -148,6 +164,11 @@ struct ArrangementWrite {
     // true: rewrite the song as `before` held it (an overdub), which it must
     // still hold, instead of writing into a blank song.
     bool replace;
+    // New pattern slots on one aux track (8-15), written before the scenes so
+    // new scenes can name them: each the track's next free slot, in order.
+    u32 pattern_track;
+    const PatternWrite* patterns;
+    u32 pattern_count;
 };
 // Each action needs its permission (profiles/extensions.json) and works only in
 // a queued_control callback for a key the extension claims, once stock accepted
@@ -188,6 +209,13 @@ struct Actions {
     // turns off as that entry starts, so the scene repeats until another is
     // chosen. Returns false outside a project. Needs hold_song_end.
     bool (*hold_song_end)(const Context&);
+    // Copy one pattern slot of an aux track (8-15). Needs read_pattern.
+    bool (*read_pattern)(const Context&, u32 track, u32 slot, PatternRead& out);
+    // Turn song playback on for the selected song: stopped, from its start (as
+    // choosing it on the song page does); playing, from where it is. Stock's
+    // "no song" reads as song 1 with playback off, so that is song 1. Returns
+    // false outside a project. Needs play_song.
+    bool (*play_song)(const Context&);
 };
 
 using OnContext = void (*)(const Context&);
@@ -204,6 +232,17 @@ using OnSceneSelect = SceneTiming (*)(const Context&, const SceneSelect&);
 // claim's owner handles it, its actions are granted, as for its key.
 struct PageLeft { u32 page; const char* claim; };
 using OnPageLeft = void (*)(const Context&, const PageLeft&, const Actions&);
+// A punch-in key pressed or released, playing or not: a note on aux track 2
+// (track 9), from that track or Shift + a key on an instrument track. The note
+// names the effect; velocity is 0 on release. Position is the playhead in track
+// 9's pattern (480 ticks a step; just before its start reads negative, as for
+// recorded notes), and length that pattern's length in ticks.
+struct PunchIn { u32 note; u32 velocity; bool pressed; i32 position; u32 length; };
+// A punch_in subscriber's answer for a press: stock records it into track 9's
+// pattern while recording, as ever, or `skip` keeps it out of stock's recorder
+// (and its undo snapshot); the effect still plays. Any subscriber may skip.
+enum class PunchRecording : u8 { stock, skip };
+using OnPunchIn = PunchRecording (*)(const Context&, const PunchIn&);
 // What the SDK's indicator over every page shows for an extension: nothing,
 // armed (record and pause) or running (record and play), then record and stop
 // for about two seconds once running ends. The strongest any extension asks
@@ -256,48 +295,54 @@ struct Hooks {
     // The selected stock page changed, playing or not; seen at the next
     // controller update. Actions as for a key of the claim it names.
     OnPageLeft page_left;
+    // A punch-in key pressed or released; a transform: a press can be kept out
+    // of stock's recorder.
+    OnPunchIn punch_in;
 
     constexpr Hooks() : Hooks(nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr) {}
     // Every callback in order; prefer the with_ builders below.
     constexpr Hooks(OnContext a, OnRecordableNoteOn b, OnSelectedNoteOff c, OnRecordingTick d,
                     OnInputActivity e, OnQueuedControl f, OnSceneBoundary g, OnTrackMute h,
-                    OnSceneSelect i, OnIndicator j = nullptr, OnPageLeft k = nullptr)
+                    OnSceneSelect i, OnIndicator j = nullptr, OnPageLeft k = nullptr, OnPunchIn l = nullptr)
         : context(a), recordable_note_on(b), selected_note_off(c), recording_tick(d),
           input_activity(e), queued_control(f), scene_boundary(g), track_mute(h), scene_select(i), indicator(j),
-          page_left(k) {}
+          page_left(k), punch_in(l) {}
 
     constexpr Hooks with_context(OnContext f) const {
-        return Hooks(f, recordable_note_on, selected_note_off, recording_tick, input_activity, queued_control, scene_boundary, track_mute, scene_select, indicator, page_left);
+        return Hooks(f, recordable_note_on, selected_note_off, recording_tick, input_activity, queued_control, scene_boundary, track_mute, scene_select, indicator, page_left, punch_in);
     }
     constexpr Hooks with_recordable_note_on(OnRecordableNoteOn f) const {
-        return Hooks(context, f, selected_note_off, recording_tick, input_activity, queued_control, scene_boundary, track_mute, scene_select, indicator, page_left);
+        return Hooks(context, f, selected_note_off, recording_tick, input_activity, queued_control, scene_boundary, track_mute, scene_select, indicator, page_left, punch_in);
     }
     constexpr Hooks with_selected_note_off(OnSelectedNoteOff f) const {
-        return Hooks(context, recordable_note_on, f, recording_tick, input_activity, queued_control, scene_boundary, track_mute, scene_select, indicator, page_left);
+        return Hooks(context, recordable_note_on, f, recording_tick, input_activity, queued_control, scene_boundary, track_mute, scene_select, indicator, page_left, punch_in);
     }
     constexpr Hooks with_recording_tick(OnRecordingTick f) const {
-        return Hooks(context, recordable_note_on, selected_note_off, f, input_activity, queued_control, scene_boundary, track_mute, scene_select, indicator, page_left);
+        return Hooks(context, recordable_note_on, selected_note_off, f, input_activity, queued_control, scene_boundary, track_mute, scene_select, indicator, page_left, punch_in);
     }
     constexpr Hooks with_input_activity(OnInputActivity f) const {
-        return Hooks(context, recordable_note_on, selected_note_off, recording_tick, f, queued_control, scene_boundary, track_mute, scene_select, indicator, page_left);
+        return Hooks(context, recordable_note_on, selected_note_off, recording_tick, f, queued_control, scene_boundary, track_mute, scene_select, indicator, page_left, punch_in);
     }
     constexpr Hooks with_queued_control(OnQueuedControl f) const {
-        return Hooks(context, recordable_note_on, selected_note_off, recording_tick, input_activity, f, scene_boundary, track_mute, scene_select, indicator, page_left);
+        return Hooks(context, recordable_note_on, selected_note_off, recording_tick, input_activity, f, scene_boundary, track_mute, scene_select, indicator, page_left, punch_in);
     }
     constexpr Hooks with_scene_boundary(OnSceneBoundary f) const {
-        return Hooks(context, recordable_note_on, selected_note_off, recording_tick, input_activity, queued_control, f, track_mute, scene_select, indicator, page_left);
+        return Hooks(context, recordable_note_on, selected_note_off, recording_tick, input_activity, queued_control, f, track_mute, scene_select, indicator, page_left, punch_in);
     }
     constexpr Hooks with_track_mute(OnTrackMute f) const {
-        return Hooks(context, recordable_note_on, selected_note_off, recording_tick, input_activity, queued_control, scene_boundary, f, scene_select, indicator, page_left);
+        return Hooks(context, recordable_note_on, selected_note_off, recording_tick, input_activity, queued_control, scene_boundary, f, scene_select, indicator, page_left, punch_in);
     }
     constexpr Hooks with_scene_select(OnSceneSelect f) const {
-        return Hooks(context, recordable_note_on, selected_note_off, recording_tick, input_activity, queued_control, scene_boundary, track_mute, f, indicator, page_left);
+        return Hooks(context, recordable_note_on, selected_note_off, recording_tick, input_activity, queued_control, scene_boundary, track_mute, f, indicator, page_left, punch_in);
     }
     constexpr Hooks with_indicator(OnIndicator f) const {
-        return Hooks(context, recordable_note_on, selected_note_off, recording_tick, input_activity, queued_control, scene_boundary, track_mute, scene_select, f, page_left);
+        return Hooks(context, recordable_note_on, selected_note_off, recording_tick, input_activity, queued_control, scene_boundary, track_mute, scene_select, f, page_left, punch_in);
     }
     constexpr Hooks with_page_left(OnPageLeft f) const {
-        return Hooks(context, recordable_note_on, selected_note_off, recording_tick, input_activity, queued_control, scene_boundary, track_mute, scene_select, indicator, f);
+        return Hooks(context, recordable_note_on, selected_note_off, recording_tick, input_activity, queued_control, scene_boundary, track_mute, scene_select, indicator, f, punch_in);
+    }
+    constexpr Hooks with_punch_in(OnPunchIn f) const {
+        return Hooks(context, recordable_note_on, selected_note_off, recording_tick, input_activity, queued_control, scene_boundary, track_mute, scene_select, indicator, page_left, f);
     }
 };
 }}

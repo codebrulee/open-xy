@@ -6,7 +6,8 @@
     "record_double_tap",
     "performance_play",
     "performance_stop",
-    "performance_undo"
+    "performance_undo",
+    "performance_arm"
   ],
   "actions": [
     "edit_notes",
@@ -16,6 +17,8 @@
     "undo_arrangement",
     "stop_song",
     "disarm_record",
-    "hold_song_end"
+    "hold_song_end",
+    "read_pattern",
+    "play_song"
   ]
 }

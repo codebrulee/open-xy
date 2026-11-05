@@ -34,6 +34,10 @@ RUNTIME = 'sdk/platform/extension_runtime.hpp'
 SOURCE_SUFFIXES = ('.cpp', '.cc', '.h', '.hpp', '.inc')
 
 
+# Actions whose Actions members are named differently from the action.
+ACTION_MEMBERS = {'edit_notes': ('insert_notes', 'replace_notes')}
+
+
 def registry():
     """The claims and actions an extension may declare: SDK contracts. Claims are
     data (a label, the key it governs and, optionally, the stock page it needs,
@@ -134,7 +138,18 @@ def extension_at(folder):
     require(not data['actions'] or data['claims'], f'{name}: actions are granted through a claim it holds')
     for path in root.rglob('*'):
         if path.is_file() and path.suffix in SOURCE_SUFFIXES and '.git' not in path.relative_to(root).parts:
-            validate_source_boundary(path.read_text(encoding='utf-8'), f'{name}/{path.relative_to(root).as_posix()}')
+            relative = path.relative_to(root)
+            text = path.read_text(encoding='utf-8')
+            validate_source_boundary(text, f'{name}/{relative.as_posix()}')
+            # An action it calls but doesn't declare is never granted: the call
+            # fails on the device while host tests with fake actions pass.
+            if relative.parts[0] != 'tests':
+                for action in actions:
+                    if action in data['actions']:
+                        continue
+                    for member in ACTION_MEMBERS.get(action, (action,)):
+                        require(not re.search(r'(?:\.|->)\s*' + member + r'\s*\(', text),
+                                f'{name}: {relative.as_posix()} calls {member} but extension.json doesn\'t declare {action}')
     return Extension(name, root, tuple(data['claims']), tuple(data['actions']),
                      {k: data[k] for k in TEXT_LIMITS if k in data}, master_filter)
 

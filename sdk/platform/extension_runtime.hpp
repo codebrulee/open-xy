@@ -16,6 +16,8 @@ const u32 action_undo_arrangement = 1u << 4;
 const u32 action_stop_song = 1u << 5;
 const u32 action_disarm_record = 1u << 6;
 const u32 action_hold_song_end = 1u << 7;
+const u32 action_read_pattern = 1u << 8;
+const u32 action_play_song = 1u << 9;
 
 struct ExtensionEntry {
     const char* id;
@@ -64,6 +66,8 @@ bool extensions_scene_select(const extensions::SceneSelect& select);
 // The strongest indicator any extension asks for now (the overlay polls it each
 // frame), with the latest context; none before the collection has started.
 extensions::Indicator extensions_indicator();
+// Every subscriber sees the punch-in; true when one keeps a press out of stock's recorder.
+bool extensions_punch_in(const extensions::PunchIn& punch);
 
 // An instrument track's pattern, as notes are written to it.
 struct TrackPattern { u32 pattern, length, scale; bool editable; };
@@ -87,7 +91,9 @@ extensions::Write extension_write_arrangement(const extensions::ArrangementWrite
 extensions::Undo extension_undo_arrangement(const extensions::ArrangementWrite& write);
 bool extension_stop_song();  // set project +7 bit 4 (8d584284)
 bool extension_disarm_record();
-bool extension_hold_song_end();  // until Stop: a song that would stop at its end keeps its last scene  // clear the record arm (+0x305f) and Play's copy of it (+0x3061)
+bool extension_hold_song_end();
+bool extension_read_pattern(u32 track, u32 slot, extensions::PatternRead& out);  // an aux track's slot
+bool extension_play_song(bool playing);  // the selected song: 8d58586c + 8d5919bc stopped, 8d5842a0 playing  // until Stop: a song that would stop at its end keeps its last scene  // clear the record arm (+0x305f) and Play's copy of it (+0x3061)
 // The collection was found valid: the adapter starts what it adds beside the
 // events (the indicator's overlay client).
 void extension_started();
