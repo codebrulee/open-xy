@@ -10,7 +10,7 @@ export const selectArtwork = Graphics.selectArtwork;
 // The init preset's authored settings, shared with tooling.adapters.default_preset
 // (write_builder inlines this same file's content for the offline export).
 import DEFAULT_PRESET_TEMPLATE from '../tooling/default_preset.json' with { type: 'json' };
-export const PROFILE_SHA256 = 'cbd280fd62dc8e2d4e5993f07df29335057b8ceac29e4f5f3c652e2e6e81b361';
+export const PROFILE_SHA256 = '7be81dc9b48847571711cc39977afe48cfe567da7274058fa3e654918ec8d191';
 export function requireThat(ok, message) { if (!ok) throw new Error(message); }
 const check = requireThat;
 const utf8 = new TextEncoder();
@@ -998,6 +998,14 @@ export async function buildAssets(kit, selection, catalog, numbers, options = {}
     const data=decode64(filter.artwork);
     check(data.length<=65536 && await sha256(data)===filter.sha256, 'Master filter artwork differs');
     files['content/display/'+filter.asset]=data;
+  }
+  // The SDK's overlay over every page (tooling.native.prepare_assets). Every exported kit
+  // carries it (tooling.browser_kit); without the file the overlay stops asking to paint
+  // once its load has had time (overlay.cpp).
+  if (kit.overlayArtwork !== undefined) {
+    check(typeof kit.overlayArtwork === 'string' && kit.overlayArtwork.split('</svg>').length === 2,
+          'The site’s machine data is damaged. Reload this page.');
+    files['content/display/openxy_overlay.svg'] = utf8.encode(kit.overlayArtwork);
   }
   for (const machine of machines)
     for (const [path, preset] of Object.entries(presetFiles(machine)))
