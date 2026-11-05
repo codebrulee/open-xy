@@ -27,6 +27,7 @@ from .adapters import (aux_preset_files, catalog_entry, check_aux_presets, gener
                        generate_voice, generate_drum_callbacks, preset_files, sample_callbacks, track_control,
                        control_callbacks)
 from .contributors import validate_source_boundary
+from . import overlay_clients
 from .firmware import active_services, assemble, hook_instruction, hook_target, patch_active
 from .formats import elf32, elf_sections, require, sha
 from .machines import FIXED_NUMBERS, by_kind, collection, layout_document, read_collection, read_layout, tree
@@ -45,6 +46,8 @@ DEFINITIONS = dict(stock_catalog_insert=0x8d5bd928, stock_gui_role=0x8d5c3eac, s
                    stock_player_load_tail=0x8d588d98, stock_player_load_kept=0x8d588da2,
                    stock_player_name_tail=0x8d5bdddc, stock_player_id_tail=0x8d5bde64, stock_sample_slice_receive_tail=0x8d5b1264)
 TEMPLATES = 'sdk/platform/opxy-1.2.1/'
+# The SDK's overlay over every page (overlay.hpp), installed with every build.
+OVERLAY_ARTWORK = TEMPLATES + 'overlay.svg'
 RUNTIME_ASM, RUNTIME_CXX = 'sdk/platform/blackfin/divide.s', 'sdk/platform/blackfin/memory.cpp'
 ALLOWED_SECTIONS = {'.text', '.rodata', '.data', '.bss'}
 MAX_COMPILER_FILE = 64 << 20
@@ -215,7 +218,7 @@ SDK_UNITS = ('divide', 'memory', 'registration', 'registration_stock', 'startup'
              'project_companion_table', 'profiling', 'lfo', 'lfo_stock', 'lfo_hooks', 'aux5_stage', 'aux5_hooks', 'stock_browser',
              'extension_runtime', 'extension_collection', 'extension_stock', 'track_control',
              'track_control_table', 'track_control_hooks', 'track_control_project',
-             'synth_pages', 'aux_tracks', 'aux_hooks', 'presets',
+             'synth_pages', 'aux_tracks', 'aux_hooks', 'presets', 'overlay', 'overlay_clients',
              'master_filter_state', 'master_filter_collection', 'master_filter_stock', 'master_filter_hooks', 'master_filter_panel',
              'players', 'player_hooks', 'player_table', 'keyboard_octaves', 'sample_overview', 'sample_overview_stock',
              'drum_machines', 'drum_callbacks', 'drum_values_stock', 'drum_synthesis_stock', 'drum_hooks')
@@ -475,6 +478,8 @@ def compile_collection(directory, toolchain, compiler, profile, machines, defini
                 return assemble_unit(ROOT / RUNTIME_ASM, obj)
             if step == 'memory':
                 return cxx(RUNTIME_CXX, obj)
+            if step == 'overlay_clients':
+                return cxx(str(overlay_clients.generate(folder, {u for _n, x, u in plan(machines, profile) if x is None})), obj)
             if step == 'startup_label':
                 return assemble_unit(startup_label.generate(folder, version), obj)
             if step == 'startup':
@@ -874,7 +879,8 @@ def extend_catalog(catalog, profile, machines):
 
 def prepare_assets(catalog, profile, machines):
     require(sha(catalog) == profile['stock_catalog_sha256'], 'Stock catalog hash mismatch')
-    outputs = {'content/op1_factory.json': extend_catalog(catalog, profile, machines)}
+    outputs = {'content/op1_factory.json': extend_catalog(catalog, profile, machines),
+               'content/display/openxy_overlay.svg': (ROOT / OVERLAY_ARTWORK).read_bytes()}
     for m in machines:
         if m.display != 'stock':
             outputs[f'content/display/{m.native_name}.svg'] = screen.compose(validate_panel(m))

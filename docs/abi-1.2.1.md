@@ -312,6 +312,26 @@ page is an owned synth's, it is painted right after slot 0, beneath stock
 overlays such as the octave indicator. Every other slot keeps its order and
 page IDs are unchanged.
 
+### The SDK's overlay
+
+The last page slot is never given to a machine (the builder and
+`sdk.py build` skip it). The SDK registers its own screen there after every
+machine's, on the GUI role, drawing `content/display/openxy_overlay.svg`, which
+every build installs ([`overlay.hpp`](../sdk/platform/opxy-1.2.1/overlay.hpp)).
+The compositor (`8d5213f4`) paints a slot that isn't the current page when its
+method table's entry +8 says so, as it does for stock's octave indicator; the
+overlay's says so while a client wants to be seen, and for one frame after,
+which hides what was shown. It takes no input, so every page keeps its keys.
+
+A client owns a group in the artwork and gives three callbacks: bind its nodes
+once the artwork loads, say whether it wants to be seen (every frame), and show
+or hide its group before drawing. SDK units list their client in
+`tooling/overlay_clients.py` and are drawn only in builds that link them; a
+service the overlay doesn't link against adds its client at run time with
+`sdk_overlay_add`. A build without the artwork file asks to paint only while
+it loads, then never again. A layout that gave the last page to a machine
+before it was reserved keeps it, and the overlay is absent.
+
 The stock SVG parser **asserts (halts) on a number with five or more decimal
 places**, and parses exponents on a separate, unverified path. Every authored
 asset is limited to at most four decimal places and no exponents.
