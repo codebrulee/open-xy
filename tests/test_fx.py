@@ -121,6 +121,8 @@ void process(State&, opxy::Buffer buffer, opxy::Channel left, opxy::Channel, opx
         self.assertIn('struct Object { const void* const* vtable; State state; opxy::u32 slot; };', text)
         self.assertIn('static_assert(sizeof(State) + 4 <= opxy::effect_state_bytes', text)
         self.assertIn('object->slot = slot;', text)
+        # Aux 5's FX III (slot 12) keeps its row in the same word of its own track.
+        self.assertIn('slot == 12 || slot == 14 || slot == 15', text)
         self.assertIn('static const opxy::u8 kShiftChoices[2] = {3, 2};', text)
         self.assertIn('process(object->state, left, right, words)', text)
         # The control table names the row and captions its choices as slots 8 and 9.

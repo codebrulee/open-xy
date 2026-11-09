@@ -11,6 +11,9 @@ const opxy::platform::DrumMachine* sdk_drum_machine(opxy::u32) { return nullptr;
 bool sdk_drum_values(opxy::u32, opxy::u8*, opxy::u8*) { return false; }
 // FX III's send page names nothing here (track5_fx.cpp).
 const char* sdk_track5_title(opxy::u32) { return nullptr; }
+// The effect FX III shows on its own page on Aux 5 (track5_fx.cpp), or 0.
+opxy::u32 host_fx3_own;
+opxy::u32 sdk_track5_own() { return host_fx3_own; }
 
 namespace {
 using opxy::i32;
@@ -84,6 +87,19 @@ int main() {
     scale = 2;
     require(sdk_param_steps(2, 2, &scale) == 17 && scale == 1, "Second enum not stepped");
     require(sdk_param_steps(14, 1, &scale) == 4 && scale == 1, "Effect enum not stepped");
+    // FX III's own page on Aux 5 (track 12) holds effect 8's controls in its words:
+    // slot 1's enum is word 5, and words past the eight are continuous.
+    host_fx3_own = 8;
+    scale = 2;
+    require(sdk_param_steps(12, 5, &scale) == 4 && scale == 1 && stock_asks == 0, "FX III enum not stepped");
+    scale = 2;
+    require(sdk_param_steps(12, 37, &scale) == 0xffffffff && scale == 2 && stock_asks == 0, "FX III word 37 asked stock");
+    require(sdk_param_steps(12, 54, &scale) == 0xffffffff && stock_asks == 0, "FX III word 54 asked stock");
+    scale = 2;
+    require(sdk_param_steps(12, 4, &scale) == 0xffffffff && stock_asks == 1 && scale == 16, "FX III word 4 not stock's");
+    host_fx3_own = 0;
+    require(sdk_param_steps(12, 37, &scale) == 0xffffffff && stock_asks == 2, "Aux 5 without its own page not stock's");
+    stock_asks = 0;
     // Continuous and oversized slots, other tracks and other engines ask stock.
     const u32 asked[][2] = {{2, 1}, {2, 3}, {2, 8}, {3, 0}, {14, 0}, {15, 1}, {9, 0}};
     for (const auto& a : asked) {

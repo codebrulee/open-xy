@@ -34,6 +34,10 @@ int main() {
         process(object, left, right, params);
         if (left[0] != 16 || scratch[slot == 14][0] != 7) return 3;
     }
+    // FX III on Aux 5 (slot 12) gets FX II's.
+    asked_slot = asked_bytes = 0;
+    init(object, 12);
+    if (asked_slot != 15 || asked_bytes != 64 || object->buffer != scratch[0]) return 5;
     // Any other slot asks stock for nothing and gets an empty buffer.
     asked_slot = 99;
     init(object, 3);

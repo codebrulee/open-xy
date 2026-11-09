@@ -4,11 +4,14 @@
 // in the track's input buffer. The effects are stock's send effects and the
 // collection's (track5_fx.hpp). The choice is the track's word 7, which stock saves
 // with the project and which no stock page reaches: kTag plus the effect's ID, with
-// kBypass for encoder 1's bypass. Only tagged values count, so whatever a project
-// already holds there means the first effect. Words 4..6 are the effect's first
-// three controls. On send, M1 shows the stock FX page, as on FX I and II, whose
-// encoders edit them through stock's editor; its fourth position is the track's
-// Level. Each effect's fourth control is its Dry, which means nothing here.
+// kBypass for encoder 1's bypass and kFull once all eight controls are stored. Only
+// tagged values count, so whatever a project already holds there means the first
+// effect. kFx3Words holds the effect's eight controls (words 4..6 its first three,
+// as before kFull) and word 36 its shift row, as on the sends. On send, M1 shows
+// the effect's own page when it has one, whose encoders, presses and Shift row edit
+// those words as on a send (synth_controls.cpp); otherwise the stock FX page, as on
+// FX I and II, whose encoders edit the first three through stock's editor and
+// whose fourth position is the track's Level, which the Input page also edits.
 #include "stock.hpp"
 #include "stock_browser.hpp"
 #include "track5_fx.hpp"
@@ -28,6 +31,8 @@ opxy::u32 sdk_track5_find_inputs(opxy::u32, const char*, opxy::u32) __asm__("sdk
 opxy::u32 sdk_track5_find_inactive(opxy::u32, const char*, opxy::u32) __asm__("sdk_track5_find_inactive");
 opxy::u32 sdk_track5_icons() __asm__("sdk_track5_icons");
 opxy::u32 sdk_track5_turn(opxy::u32 encoder, opxy::u32 event) __asm__("sdk_track5_turn");
+// The send page's turn (synth_controls.cpp), which FX III's own page shares.
+opxy::u32 sdk_effect_turn(opxy::u32, opxy::u32, opxy::u32, opxy::u32) __asm__("sdk_effect_turn");
 void sdk_track5_key(const opxy::u32* event) __asm__("sdk_track5_key_press");
 }
 
@@ -45,13 +50,14 @@ using Process = void (*)(void*, i32*, i32*, const i32*);
 using Init = void (*)(void*, u32);
 using Factory = void* (*)(void*);
 const u32 kFrames = 64;
-const u32 kAudioTrack = 12, kChoiceWord = 7;
+const u32 kAudioTrack = opxy::platform::kFx3Track, kChoiceWord = 7, kShiftWord = 36;
 const u32 kMainOut = 4;
 const u32 kSendFrom = 1932735283;  // 0.9, Q31
 const u32 kProject = 0x86bd027c;   // the GUI's project
 const u32 kTag = 0x53000000, kTagMask = 0xffffff00, kNumberMask = 0xff;
 const u32 kBypass = 0x100;         // in the choice word: encoder 1 has the send off
-const u32 kFirstControl = 4, kControls = 3, kLevelWord = 41;
+const u32 kFull = 0x200;           // and every control word and the shift row are stored
+const u32 kControls = 3, kLevelWord = 41;
 const u32 kAuxPage = 0x0801eae4;   // 0 on M1
 const u32 kKeyM1 = 6;
 const u32 kFxPage = 21, kBadge = 0x40;
@@ -103,7 +109,7 @@ bool silent(const i32* samples, u32 count) {
 // own display is ready only once the GUI's pages are, so it checks the effect's
 // record for a factory before running it instead.
 i32 find(u32 choice, bool gui = true) {
-    const u32 value = choice & ~kBypass, number = value & kNumberMask;
+    const u32 value = choice & ~(kBypass | kFull), number = value & kNumberMask;
     if ((value & kTagMask) != kTag || number >= sdk_fx3_record_count) return -1;
     for (u32 i = 0; i < sdk_fx3_effect_count; ++i)
         if (sdk_fx3_effects[i].number() == number && (!gui || sdk_fx3_effects[i].available()))
@@ -126,20 +132,42 @@ browser::StockSelector<opxy::platform::kFx3Limit> selector = {};
 const char* labels[opxy::platform::kFx3Limit];
 u32 rows[opxy::platform::kFx3Limit];
 
+// Gives the effect's controls from `first` on their defaults and its shift row its
+// first choices, then marks the choice word full.
+void fill(const Fx3Effect& effect, u32 choice, u32 first) {
+    for (u32 i = first; i < 8; ++i) store(opxy::platform::kFx3Words[i], static_cast<u32>(effect.defaults[i]));
+    store(kShiftWord, 0);
+    store(kChoiceWord, choice | kFull);
+}
 void apply(u32 index) {
     const u32 choice = stored(kChoiceWord);
     const Fx3Effect& effect = sdk_fx3_effects[index];
-    store(kChoiceWord, (kTag | effect.number()) | (chosen(choice) ? choice & kBypass : 0));
-    for (u32 i = 0; i < kControls; ++i) store(kFirstControl + i, static_cast<u32>(effect.defaults[i]));
+    fill(effect, (kTag | effect.number()) | (chosen(choice) ? choice & kBypass : 0), 0);
+}
+// A project from before kFull holds only the first three controls: the rest start
+// from their defaults, as the audio side has played them.
+void complete() {
+    const u32 choice = stored(kChoiceWord);
+    if (!chosen(choice)) apply(0);
+    else if (!(choice & kFull)) fill(effect_of(choice), choice, kControls);
 }
 void choose(void*, u32 row) { apply(rows[row]); }
 
 bool on_track() { return byte(opxy::platform::kSelectedTrack) == kAudioTrack; }
 bool on_send() { return stored(0) >= kSendFrom; }
 bool on_m1() { return on_track() && word(kAuxPage) == 0; }
-// GUI: track 5's M1 shows the stock FX page.
+// GUI: track 5's M1 shows the effect's page, its own or the stock FX page.
 bool showing_fx() { return on_m1() && on_send() && !input_view; }
+// The chosen effect's own page: its record's page (word 3), or 0 on the stock FX page.
+u32 own_page() {
+    const Fx3Effect& effect = effect_of(stored(kChoiceWord));
+    if (!effect.ready) return 0;  // stock's
+    const u32 page = word(sdk_fx3_records + effect.number() * sdk_fx3_record_bytes + 12);
+    return page == kFxPage ? 0 : page;
 }
+}
+
+u32 sdk_track5_own() { return showing_fx() && own_page() ? effect_of(stored(kChoiceWord)).number() : 0; }
 
 // GUI: stock's Shift and track key, which acts only on the two sends.
 void sdk_track5_pick(u32 track) {
@@ -159,8 +187,9 @@ void sdk_track5_pick(u32 track) {
 // GUI: 8c08f540, the aux page (through aux_controller.cpp, as the next three). 0 leaves it to stock.
 u32 sdk_track5_screen() {
     if (!showing_fx()) return 0;
-    if (!chosen(stored(kChoiceWord))) apply(0);  // gives the controls their defaults
-    return kFxPage;
+    complete();  // gives the controls their defaults
+    const u32 page = own_page();
+    return page ? page : kFxPage;
 }
 
 // GUI: 8c08fa14, an encoder turn. 1 when it was this page's. Turning Input keeps
@@ -171,8 +200,12 @@ u32 sdk_track5_turn(u32 encoder, u32 event) {
         if (on_m1() && position == 0) input_view = true;
         return 0;
     }
+    if (own_page()) {
+        sdk_effect_turn(kProject, kAudioTrack, position, event);
+        return 1;
+    }
     stock<u32(u32, u32, u32, u32)>(0x8d5ad5bc)(kProject, kAudioTrack,
-        position < kControls ? kFirstControl + position : kLevelWord, event);
+        position < kControls ? opxy::platform::kFx3Words[position] : kLevelWord, event);
     return 1;
 }
 
@@ -259,7 +292,7 @@ u32 sdk_track5_vector(u32 track) {
     if (!on_page(track)) return stock<u32(u32)>(0x8d4d72a8)(track);
     static u32 words[8];
     static struct { u32 allocator, begin, end, capacity; } vector;
-    for (u32 i = 0; i < kControls; ++i) words[i] = stored(kFirstControl + i);
+    for (u32 i = 0; i < kControls; ++i) words[i] = stored(opxy::platform::kFx3Words[i]);
     words[kControls] = stored(kLevelWord);
     vector.allocator = 0;
     vector.begin = static_cast<u32>(reinterpret_cast<Address>(words));
@@ -354,6 +387,9 @@ void sdk_track5_stage(u32 a, u32 b, const i32* aux) {
         // for its slot's memory, which only FX I and II have: as FX II's while init runs,
         // with the allocator moved up by the most any effect may take, which FX II's own
         // effect never reaches. A record without a factory leaves the return silent.
+        // Stock's effects are given FX II's slot; the collection's are given Aux 5's,
+        // whose adapter borrows FX II's scratch and reads Aux 5's shift row
+        // (tooling/adapters.py).
         const Factory factory = *at<const Factory>(sdk_fx3_records + effect.number() * sdk_fx3_record_bytes);
         if (!factory) {
             for (u32 i = 0; i < 2 * kFrames; ++i) buffer[i] = 0;
@@ -364,7 +400,7 @@ void sdk_track5_stage(u32 a, u32 b, const i32* aux) {
         volatile u32& scratch = *at<volatile u32>(kScratch);
         const u32 lower = scratch;
         scratch = lower + sdk_fx3_buffer_limit;
-        reinterpret_cast<Init>(fresh[0x14 / 4])(self, kBorrowedSlot);
+        reinterpret_cast<Init>(fresh[0x14 / 4])(self, effect.ready ? kAudioTrack : kBorrowedSlot);
         scratch = lower;
         built = effect.number() + 1;
         quiet = 0;
@@ -374,9 +410,11 @@ void sdk_track5_stage(u32 a, u32 b, const i32* aux) {
         left[i] = aux[2 * i] >> kBusShift;
         right[i] = aux[2 * i + 1] >> kBusShift;
     }
+    // A project from before kFull holds the first three controls; the rest play their defaults.
     i32 parameters[8];
+    const u32 stored_controls = !own ? 0 : choice & kFull ? 8 : kControls;
     for (u32 i = 0; i < 8; ++i)
-        parameters[i] = i < kControls && own ? static_cast<i32>(words[kFirstControl + i]) : effect.defaults[i];
+        parameters[i] = i < stored_controls ? static_cast<i32>(words[opxy::platform::kFx3Words[i]]) : effect.defaults[i];
     reinterpret_cast<Process>(methods[0x10 / 4])(self, left, right, parameters);
     for (u32 i = 0; i < kFrames; ++i) {
         buffer[2 * i] = to_aux(left[i]);

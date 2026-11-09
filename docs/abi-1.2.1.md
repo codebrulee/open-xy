@@ -1003,19 +1003,45 @@ send is its send level; the track's Level and Mix set the return.
   stock's FX bus level, and its return goes back `<< 11`, saturating: linear
   effects don't care, but dist and lofi saturate at the bus's level.
 - **The effect:** one 480-byte object, built from the effect's record
-  ([relocated table](#send-effects)) as FX II's slot 15. Its `init` asks
-  `scratch` for slot 15's memory, so while it runs the allocator's next
-  address (`84a50b90`) is moved up by the most an effect may ask for (512 KiB),
-  which FX II's own effect never reaches, then put back. A record without a
-  factory leaves the return silent.
+  ([relocated table](#send-effects)). Its `init` asks `scratch` for slot 15's
+  memory, so while it runs the allocator's next address (`84a50b90`) is moved
+  up by the most an effect may ask for (512 KiB), which FX II's own effect never
+  reaches, then put back. Stock's effects are given slot 15; the collection's
+  slot 12, Aux 5's, whose adapter asks `scratch` for slot 15's memory and reads
+  Aux 5's shift row. A record without a factory leaves the return silent.
 - **Silence gate:** after about 6 s (4096 blocks) with the bus and the return
   below about -114 dBFS, the effect stops running until the bus carries signal.
 - **Storage:** the choice is word 7, `0x53000000` plus the effect ID, with
-  `0x100` for the bypass; words 4..6 are the effect's first three controls.
-  Stock saves all of them with the project and no stock page reaches them. A
-  word that isn't tagged, or names an effect the build lacks, means stock delay
-  with its defaults. The [project companion](projects.md) doesn't map word 7, so
-  an SDK effect's number must stay the same between builds (`--layout`).
+  `0x100` for the bypass and `0x200` once all eight controls are stored. The
+  effect's controls are words 4, 5, 6, 37, 49, 50, 53 and 54, and its
+  [shift row](#effect-pages-and-shift-rows) word 36, as on the sends. Choosing
+  an effect stores its eight defaults, the shift row's first choices and
+  `0x200`. A project from before `0x200` holds only the first three controls:
+  the audio side plays the rest at the effect's defaults, and the GUI stores
+  those and `0x200` when M1 next shows the effect. Builds from before `0x200`
+  read such a word as untagged. A word that isn't tagged, or names an effect
+  the build lacks, means stock delay with its defaults. The
+  [project companion](projects.md) doesn't map word 7, so an SDK effect's
+  number must stay the same between builds (`--layout`).
+- **Why these words:** stock saves all 58 of a track's words with the pattern
+  and sends each set one to the audio side (message 0xa1). Of track 13's words,
+  stock's aux controller edits 0, 1, 3 (Input, Drive, Mix), 16..19 and 24..27,
+  and turns its third M1 encoder to Level, word 41 (`8c08faf2`), never word 2;
+  M2 edits the sends on the source tracks (word 20). Words 8..15 and 29..33
+  hold stock defaults, and stock writes 38 and 39 on every save. Words 36, 37,
+  49, 50, 53 and 54 are 0 on track 13, and 37, 53 and 54 on every aux track, in
+  all 891 project files examined; the exceptions are
+  projects where a whole instrument track's words were pasted onto an aux
+  track, which replaces words 4..7 too. Following the pointer that
+  `8d518d94(84eab39c, track)` returns through registers and the stack, no
+  audio-side function loads any of the six from it; the aux 5 processor
+  (`8d50fdc0`) loads words 0, 21..23, 40 and 41. The only GUI references to
+  their offsets (`+0x38f4`..`+0x393c` from the pattern's words at `+0x3864`)
+  are the instrument preset serializer (`8d4e6xxx`, patch.json's modulation
+  fields) and bulk copies (`8d5a5222`, `8d581e44`) that move them without
+  reading them. Word 28 (an LFO lane) and word 2 (which the aux LFO's
+  `param3` target may reach) pass the same reading but were not used. This is a static reading, which
+  can't see an index computed at run time.
 - **Effects:** the generated
   [`track5_fx_table.cpp`](../sdk/platform/opxy-1.2.1/track5_fx_table.cpp.in)
   lists the stock catalog's `fx_types`, then each send effect in the build
@@ -1026,7 +1052,7 @@ send is its send level; the track's Level and Mix set the return.
 | Site | Does |
 | --- | --- |
 | `8c08f624` | Shift + track key's selector leaving for a track other than a send: on send, opens the "fx III" list (stock browser) |
-| `8c08f540`, `8c08fa14`, `8c08fd30`, `8c08f6ec` | Shared [aux controller](#aux-tracks) sites: on send, M1 shows the stock FX page (21), whose encoders 1-3 edit words 4..6 and 4 the track's Level (word 41); Shift + M1 swaps it with the Input page |
+| `8c08f540`, `8c08fa14`, `8c08fd30`, `8c08f6ec` | Shared [aux controller](#aux-tracks) sites: on send, M1 shows the effect's own page when its record names one (word 3 other than 21), whose encoders, presses and Shift row edit its eight control words and word 36 through the send page's handlers (`sdk_effect_turn`, `sdk_synth_press`); otherwise the stock FX page (21), whose encoders 1-3 edit words 4..6 and 4 the track's Level (word 41). Shift + M1 swaps either with the Input page, whose third encoder is also Level |
 | `8d53b5ac`, `8d53b5c0`, `8d53b83e` | The FX page's parameter vector, effect ID and name, on track 13 on that page; its badge reads III |
 | `8c08f7d2` | Encoder 1's press on the Input page toggles the saved bypass instead of the input flag |
 | `8d5299a0` | The Input page shows the saved bypass |
@@ -1623,20 +1649,24 @@ publish into the same storage. No audio callback uses GUI pattern getters.
 
 ## Effect pages and shift rows
 
-A paged effect's press, on a send page, moves every position to its next
-slot, through the same press handler as a synth's (`sdk_synth_press`).
+A paged effect's press, on a send page or FX III's own page, moves every
+position to its next slot, through the same press handler as a synth's
+(`sdk_synth_press`). On FX III's page the controls past its first three are
+turned with stock's step (`8d5ad2e8`) and set, never as a held step's lock.
 
 A shift row is up to four enum controls packed into one word of the send
 track, word 36 of its 58: index × bucket + bucket / 2, the first control most
 significant, a bucket being `0x7fffffff / combinations`
 ([`shift_row.hpp`](../sdk/platform/opxy-1.2.1/shift_row.hpp)). Word 36 is 0
-on all 16 tracks in every project examined, no stock page edits it (the aux
+on every aux track in every project examined but one, which holds 0x100 in
+several words of track 16, no stock page edits it (the aux
 controller edits words 0..3, 8..15, 16..19 and 24..27; the instrument
 controller's Shift + M2 row is 32..35), and no stock code reads it: no GUI
 reference to its pattern offset (`+0x38f4`) and no audio-side load near the
 per-track table at `84eab39c`. Words 29..33 hold stock defaults on aux tracks
 and 46 has GUI readers. The audio side's loads at word 37's offset are of other
-records, not a track's ([step-lock handles](#step-lock-handles)). That is a static reading, which can't
+records, not a track's ([step-lock handles](#step-lock-handles)). [FX III](#fx-iii)
+keeps its row in word 36 of track 13. That is a static reading, which can't
 see an access computed at run time. Stock's reload and its copy of a send track
 have not been checked on the device for this word.
 
@@ -1647,7 +1677,7 @@ control's choice by the event's sign and stores the word through stock's set
 row's controls and their choices while Shift is held, and on a stock-drawn page
 the value hook's stand-in vector puts the same choices in the bars. The effect's adapter
 keeps its slot from `init(object, slot)`, reads word 36 of track 14 or 15
-from `84eab39c + slot × 0xe8`, and passes the DSP its eight words and each
+(or 13, FX III's slot 12) from `84eab39c + slot × 0xe8`, and passes the DSP its eight words and each
 control's choice as a ninth to twelfth.
 
 ## Master-processor capability

@@ -1134,7 +1134,9 @@ An effect may draw its own page on the send tracks (SDK 1.7): it declares
 `panel.svg.fragment`, exactly as a synth does ([display API](display.md)).
 Each build's layout then gives it a page from 82..255 beside its effect
 number, as it gives a synth its own. Stock shows the page an effect's
-record names on M1 of a send, so the page replaces stock's FX page there; its
+record names on M1 of a send, so the page replaces stock's FX page there, as
+it does on FX III's (Aux 5 on send), where Level stays on the Input page
+(Shift + M1); its
 header names and captions the effect's controls, or its shift row's while
 Shift is held, and the display reads them all, the shift row too
 ([input](display.md#effect-pages-sdk-17)). Effects have no browser preview

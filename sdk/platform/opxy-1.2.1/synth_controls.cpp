@@ -11,6 +11,7 @@
 #include "drum_storage.hpp"
 #include "drum_locks.hpp"
 #include "drum_lock_store.hpp"
+#include "track5_fx.hpp"
 
 extern "C" {
 void sdk_synth_press(opxy::u32) __asm__("sdk_synth_press");
@@ -56,9 +57,10 @@ const SynthControls* owned(u32 engine, bool effect = false) {
 // is never a synth, so zeroed state starts on slots 0..3.
 struct Track { u32 engine; u8 slots[opxy::page_controls]; };
 Track tracks[kAllTracks];
-// The same for the effects on the two send tracks, and whether an owned effect
-// newly on a send still has its controls 5..8 to store (sdk_send_refresh).
-Track sends[2];
+// The same for the effects on the two send tracks and FX III's own page on Aux 5,
+// and whether an owned effect newly on a send still has its controls 5..8 to
+// store (sdk_send_refresh).
+Track sends[3];
 bool unstored[2];
 
 Track* state(u32 track, u32 engine) {
@@ -132,29 +134,55 @@ namespace {
 const SynthControls* editor(u32 track) {
     if (track < kTracks) return synth(track);
     if (const u32 engine = aux_engine(track)) return owned(engine);
+    if (track == kFx3Track) {
+        const u32 effect = sdk_track5_own();
+        return effect ? owned(effect, true) : nullptr;
+    }
     return track == 14 || track == 15 ? owned(track_engine(track), true) : nullptr;
 }
 
-// The owned effect on a send track and its selection, or null. Any other
-// effect clears the selection.
+// The owned effect on a send track, or shown on its own page by FX III on Aux 5,
+// and its selection, or null. Any other effect clears the selection.
 const SynthControls* send_effect(u32 track, Track*& t) {
-    if (track != kSendTracks && track != kSendTracks + 1) return nullptr;
-    const u32 effect = track_engine(track);
-    const SynthControls* m = owned(effect, true);
-    t = &sends[track - kSendTracks];
+    const bool fx3 = track == kFx3Track;
+    if (track != kSendTracks && track != kSendTracks + 1 && !fx3) return nullptr;
+    const u32 effect = fx3 ? sdk_track5_own() : track_engine(track);
+    const SynthControls* m = effect ? owned(effect, true) : nullptr;
+    t = &sends[fx3 ? 2 : track - kSendTracks];
     if (t->engine != (m ? effect : 0)) {
         t->engine = m ? effect : 0;
         for (u32 i = 0; i < opxy::page_controls; ++i) t->slots[i] = static_cast<u8>(i);
-        unstored[track - kSendTracks] = m != nullptr;
+        if (!fx3) unstored[track - kSendTracks] = m != nullptr;
     }
     return m;
+}
+
+// The track word holding a control: the slot itself, or on Aux 5, while FX III
+// shows an effect's own page, FX III's word for it. Elsewhere on Aux 5 (its
+// Input page, stock's FX page) stock's own words stand, so the Input encoder
+// still edits word 0. Other words (the shift row's) are the same on every track.
+u32 word_of(u32 track, u32 slot) {
+    return track == kFx3Track && slot < opxy::parameter_slots && sdk_track5_own() ? kFx3Words[slot] : slot;
 }
 
 // A send track's current value of a control: stock's editor reads and writes
 // these (0x8d5ad5bc), all eight words of every track. GUI only: the track
 // object's getter follows the GUI's pattern state.
 opxy::i32 current_value(u32 track, u32 slot) {
-    return *reinterpret_cast<const volatile opxy::i32*>(stock<u32(u32)>(0x8d587708)(track) + 0x3864 + slot * 4);
+    return *reinterpret_cast<const volatile opxy::i32*>(stock<u32(u32)>(0x8d587708)(track) + 0x3864 +
+                                                        word_of(track, slot) * 4);
+}
+
+// A turn of a control through stock's editor, which steps it, locks it while a
+// step is held and stores and sends it. FX III's words past the first eight get
+// the editor's plain path, stock's step (8d5ad2e8) and set, and never a lock.
+u32 edit(u32 project, u32 track, u32 slot, u32 event) {
+    const u32 word = word_of(track, slot);
+    if (word < opxy::parameter_slots || !event)
+        return stock<u32(u32, u32, u32, u32)>(0x8d5ad5bc)(project, track, word, event);
+    const opxy::i32 next = stock<opxy::i32(u32, u32, opxy::i32, u32)>(0x8d5ad2e8)(track, word, current_value(track, slot), event);
+    set_parameter(project, track, word, next);
+    return 1;
 }
 // The GUI's project, as the send page's controller passes it to stock's editor
 // (8c08fad6), and a track's stored word in it: what a project saves.
@@ -217,8 +245,8 @@ void sdk_synth_press(u32 encoder) {
             if (next < opxy::parameter_slots) t->slots[i] = static_cast<u8>(next);
         }
     } else if (controller == kAuxController && (m = send_effect(selected_track(), t))) {
-        // An owned effect's send page: the click selects the position's next
-        // parameter, or every position's on a paged effect.
+        // An owned effect's send page, or FX III's own page on Aux 5: the click
+        // selects the position's next parameter, or every position's on a paged effect.
         for (u32 i = 0; i < opxy::page_controls; ++i) {
             if (i != encoder && !m->page) continue;
             const u32 next = m->next[t->slots[i]];
@@ -256,11 +284,17 @@ bool sdk_drum_shift_press(u32 track, u32 encoder) {
 // when turned fast), and stores the bucket's centre. An owned machine's enum
 // slot answers its choice count with scale 1: one choice per detent.
 u32 sdk_param_steps(u32 track, u32 index, u32* scale) {
-    const SynthControls* m = index < opxy::parameter_slots ? editor(track) : nullptr;
-    if (m && m->steps[index]) {
+    // Stock asks by word; FX III's own page holds its controls in kFx3Words.
+    u32 slot = index;
+    if (track == kFx3Track)
+        for (slot = 0; slot < opxy::parameter_slots && kFx3Words[slot] != index; ++slot) {}
+    const SynthControls* m = slot < opxy::parameter_slots ? editor(track) : nullptr;
+    if (m && m->steps[slot]) {
         *scale = 1;
-        return m->steps[index];
+        return m->steps[slot];
     }
+    // Nor does it step FX III's words past the first eight: continuous, as below.
+    if (m && index >= opxy::parameter_slots) return 0xffffffffu;
     // Stock's step table covers a send's four shown positions only, so a turn
     // would not move an owned effect's continuous slots 4..7: answer
     // "continuous" (-1) with scale left at its preset (tested on hardware).
@@ -313,8 +347,9 @@ u32 sdk_synth_turn(u32 project, u32 track, u32 index, u32 event) {
     return stock<u32(u32, u32, u32, u32)>(0x8d5ad5bc)(project, track, index, event);
 }
 
-// 8c08fade: auxiliary-track page, including send FX tracks 14/15. Its controller
-// folds Shift into the same 0..3 positions before this call, unlike instruments.
+// 8c08fade: auxiliary-track page, including send FX tracks 14/15, and FX III's
+// own page on Aux 5 (track5_fx.cpp calls it). Its controller folds Shift into the
+// same 0..3 positions before this call, unlike instruments.
 // Ownership is checked against the FX registry, not the synth registry, except
 // for a machine holding an aux track, whose page (tab 0) edits it as a synth.
 u32 sdk_effect_turn(u32 project, u32 track, u32 index, u32 event) {
@@ -343,9 +378,9 @@ u32 sdk_effect_turn(u32 project, u32 track, u32 index, u32 event) {
     if (m && event && (m->continuous & (1u << index)) && shift_held()) {
         const opxy::i32* source = reinterpret_cast<const opxy::i32*>(event);
         const opxy::i32 fine[3] = {source[0] / 10, source[1], source[2]};
-        return stock<u32(u32, u32, u32, const opxy::i32*)>(0x8d5ad5bc)(project, track, index, fine);
+        return edit(project, track, index, static_cast<u32>(reinterpret_cast<Address>(fine)));
     }
-    return stock<u32(u32, u32, u32, u32)>(0x8d5ad5bc)(project, track, index, event);
+    return edit(project, track, index, event);
 }
 
 // 8d53b636: the send page sets each position's value text (stock's "%02i" of
@@ -434,9 +469,10 @@ bool sdk_send_view(u32 track, SendView* view) {
     // 8d4d72a8(track), as a synth's page does: each word from
     // 8d5ac9dc(project, track, i, 0), as an LFO modulates it (tracks up to 7
     // read 8d4d7a38 instead). The page follows them too; the alternates, which
-    // no LFO reaches, and a missing vector read stock's editor's current values.
+    // no LFO reaches, a missing vector and FX III's words read stock's editor's
+    // current values.
     struct Vector { u32 owner, begin, end; };
-    const Vector* live = stock<const Vector*(u32)>(0x8d4d72a8)(track);
+    const Vector* live = track == kFx3Track ? nullptr : stock<const Vector*(u32)>(0x8d4d72a8)(track);
     const bool whole = live && live->begin && !(live->begin & 3) && live->end >= live->begin + 4 * opxy::page_controls;
     for (u32 slot = 0; slot < opxy::parameter_slots; ++slot)
         view->slots[slot] = whole && slot < opxy::page_controls ? reinterpret_cast<const opxy::i32*>(live->begin)[slot]

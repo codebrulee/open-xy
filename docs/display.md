@@ -173,7 +173,8 @@ envelope.
 
 An effect may draw its own page on the send tracks, as a synth draws its
 engine page (see [the API](api.md#effect-pages)). Its input's `slots` hold all
-eight of its controls, `track` is the send (14 or 15), and two fields follow
+eight of its controls, `track` is the send (14 or 15, or 12 for FX III on
+Aux 5), and two fields follow
 the note activity: `shift`, 1 while Shift is held on an effect with a
 [shift row](api.md#effect-pages-and-shift-rows), and `choices`, each shift
 control's choice (0 beyond the declared ones). A synth's page reads 0 in both.

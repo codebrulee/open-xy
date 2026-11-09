@@ -17,6 +17,7 @@ opxy::u32 sdk_synth_scramble(opxy::u32, opxy::u32, opxy::u32, opxy::i32) __asm__
 // FX III's send page names nothing here (track5_fx.cpp).
 const char* sdk_track5_title(opxy::u32) __asm__("sdk_track5_title");
 const char* sdk_track5_title(opxy::u32) { return nullptr; }
+opxy::u32 sdk_track5_own() { return 0; }
 }
 namespace {
 using namespace opxy;

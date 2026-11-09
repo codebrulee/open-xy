@@ -551,10 +551,13 @@ def generate_track5_fx_table(directory, machines):
 
 
 # A send slot's stock scratch memory: scratch(slot, bytes) (0x8d50e048), as stock
-# delay and reverb use it, only for the two send slots (docs/abi-1.2.1.md).
-FX_BUFFER_INIT = '''    // Stock's per-send scratch memory, which stock delay and reverb use the same way.
-    object->buffer = slot == 14 || slot == 15
-        ? opxy::platform::stock<opxy::i32*(opxy::u32, opxy::u32)>(0x8d50e048)(slot, {bytes}u) : nullptr;'''
+# delay and reverb use it, only for the two send slots (docs/abi-1.2.1.md). FX III
+# gives its effect Aux 5's slot, 12, and lends it FX II's scratch (track5_fx.cpp).
+FX_BUFFER_INIT = '''    // Stock's per-send scratch memory, which stock delay and reverb use the same way;
+    // on Aux 5 (FX III), FX II's.
+    const opxy::u32 send = slot == 12 ? 15u : slot;
+    object->buffer = send == 14 || send == 15
+        ? opxy::platform::stock<opxy::i32*(opxy::u32, opxy::u32)>(0x8d50e048)(send, {bytes}u) : nullptr;'''
 
 
 def track_control(m):
@@ -653,12 +656,13 @@ def generate_track_controls(directory, machines):
 
 
 # An effect's shift row (SDK 1.7): its choices, packed into the send track's
-# word shift_row::kWord, reach the DSP as enum words 8..11 after the eight.
+# word shift_row::kWord, reach the DSP as enum words 8..11 after the eight. On Aux 5
+# (slot 12) FX III keeps its effect's row in the same word of that track.
 SHIFT_DECLS = '''static const opxy::u8 kShiftChoices[{count}] = {{{choices}}};
 static void shift_words(opxy::u32 slot, const opxy::i32* parameters, opxy::i32* words) {{
     namespace row = opxy::platform::shift_row;
     for (opxy::u32 i = 0; i < 8; ++i) words[i] = parameters[i];
-    const opxy::i32 packed = slot == 14 || slot == 15
+    const opxy::i32 packed = slot == 12 || slot == 14 || slot == 15
         ? static_cast<opxy::i32>(opxy::platform::word(row::kAudioWords + slot * row::kTrackBytes + row::kWord * 4)) : 0;
     opxy::u32 fields[{count}];
     row::decode(packed, kShiftChoices, {count}, fields);

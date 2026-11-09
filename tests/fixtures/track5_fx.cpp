@@ -81,6 +81,10 @@ const u32* host_audio_words(u32 base, u32 track) {
     return host_audio;
 }
 u32 host_stock_vector(u32) { return 0xabc; }
+// A record's page (word 3), which FX III reads to find an effect's own page.
+void set_page(u32 number, u32 page) {
+    *reinterpret_cast<u32*>(reinterpret_cast<unsigned char*>(&host_records[number]) + 12) = page;
+}
 i32 host_stock_effect(u32) { return -7; }
 const char* host_stock_name(u32) { return "stock"; }
 }
@@ -105,6 +109,14 @@ bool opxy::platform::stock_browser::detail::open(Session&, Row*, u32 count, cons
     ++host_opened; host_count = count; host_initial = initial; host_callbacks = callbacks; host_number = track;
     for (u32 i = 0; i < count; ++i) host_labels[i] = labels[i];
     return true;
+}
+
+// The send page's turn (synth_controls.cpp), which FX III's own page shares.
+u32 host_turns, host_turn_index, host_turn_event;
+u32 sdk_effect_turn(u32 project, u32 track, u32 index, u32 event) {
+    require(project == 0x86bd027c && track == 12, "Wrong own-page turn");
+    ++host_turns; host_turn_index = index; host_turn_event = event;
+    return 0;
 }
 
 // 8d4ff264: the track's Input, from the arguments Aux 5's stage passes on.
@@ -136,6 +148,7 @@ namespace {
 const u32 kSend = 0x7a000000;      // Input's top detent (0.95)
 const u32 kMain = 0x6ccccccc;      // main out's own detent (0.85)
 u32 tag(u32 number) { return 0x53000000 | number; }
+u32 full(u32 number) { return tag(number) | 0x200; }  // all eight controls stored
 i32 aux[128];
 
 void fill(i32 value) { for (u32 i = 0; i < 128; ++i) aux[i] = value; }
@@ -172,10 +185,14 @@ int main() {
     require(host_opened == 1 && host_count == 3 && host_initial == 0 && host_number == 12, "Picker rows");
     require(std::strcmp(host_labels[0], "delay") == 0 && std::strcmp(host_labels[1], "reverb") == 0 &&
             std::strcmp(host_labels[2], "probefx") == 0, "Picker skipped or misnamed an effect");
-    // Choosing stores the tagged ID and the effect's first three defaults.
+    // Choosing stores the tagged ID, marked full, the effect's eight defaults in
+    // their words and the shift row's first choices.
+    host_words[36] = 99;
     host_callbacks.confirm(host_callbacks.context, 2);
-    require(host_words[7] == tag(20) && host_words[4] == 2000 && host_words[5] == 2001 && host_words[6] == 2002,
+    require(host_words[7] == full(20) && host_words[4] == 2000 && host_words[5] == 2001 && host_words[6] == 2002,
             "Choice not stored");
+    require(host_words[37] == 2003 && host_words[49] == 2004 && host_words[54] == 0 && host_words[36] == 0,
+            "Controls 4..8 or the shift row not stored");
     sdk_track5_pick(12);
     require(host_initial == 2, "Picker didn't start on the current effect");
 
@@ -213,19 +230,45 @@ int main() {
     // FX page it does nothing.
     sdk_track5_shift_m1();
     const unsigned char flag = host_flag;
-    require(sdk_track5_enabled() == static_cast<u32>(!flag) && host_words[7] == (tag(20) | 0x100), "Bypass on");
+    require(sdk_track5_enabled() == static_cast<u32>(!flag) && host_words[7] == (full(20) | 0x100), "Bypass on");
     require(sdk_track5_shown() == 0, "Input page doesn't show the bypass");
-    require(sdk_track5_enabled() == static_cast<u32>(!flag) && host_words[7] == tag(20), "Bypass off");
+    require(sdk_track5_enabled() == static_cast<u32>(!flag) && host_words[7] == full(20), "Bypass off");
     require(sdk_track5_shown() == 1, "Input page doesn't show the send on");
     sdk_track5_key(&m1);
     sdk_track5_enabled();
-    require(host_words[7] == tag(20), "Encoder 1 on the FX page toggled the bypass");
+    require(host_words[7] == full(20), "Encoder 1 on the FX page toggled the bypass");
     // Choosing again keeps the bypass.
-    host_words[7] = tag(20) | 0x100;
+    host_words[7] = full(20) | 0x100;
     host_callbacks.confirm(host_callbacks.context, 1);
-    require(host_words[7] == (tag(5) | 0x100) && host_words[4] == 500, "Rechoosing lost the bypass");
+    require(host_words[7] == (full(5) | 0x100) && host_words[4] == 500, "Rechoosing lost the bypass");
     host_callbacks.confirm(host_callbacks.context, 2);
-    host_words[7] = tag(20);
+    host_words[7] = full(20);
+
+    // A project from before all eight were stored keeps its choice and first three
+    // controls; showing the page gives the rest their defaults and marks it full.
+    host_words[7] = tag(20) | 0x100;
+    host_words[4] = 7; host_words[37] = host_words[49] = 0; host_words[36] = 5;
+    require(sdk_track5_screen() == 21 && host_words[7] == (full(20) | 0x100) && host_words[4] == 7 &&
+            host_words[37] == 2003 && host_words[49] == 2004 && host_words[36] == 0, "Old project not completed");
+    host_words[7] = full(20); host_words[4] = 2000;
+
+    // An effect with its own page: M1 shows it, its turns go to the send page's
+    // handler with the position, and Shift + M1 still shows the Input page.
+    require(sdk_track5_own() == 0, "Own page without a record page");
+    set_page(20, 90);
+    require(sdk_track5_screen() == 90 && sdk_track5_own() == 20, "Own page not shown");
+    const u32 edits_before = host_edits;
+    require(sdk_track5_turn(4 + 3, 81) == 1 && host_turns == 1 && host_turn_index == 3 && host_turn_event == 81 &&
+            host_edits == edits_before, "Own page turn not the send page's");
+    sdk_track5_shift_m1();
+    require(sdk_track5_screen() == 0 && sdk_track5_own() == 0, "Shift + M1 didn't leave the own page");
+    sdk_track5_key(&m1);
+    host_words[7] = full(5);  // stock's effects have no page of their own
+    require(sdk_track5_screen() == 21 && sdk_track5_own() == 0, "A stock effect shows another page");
+    set_page(20, 21);  // nor does a collection effect on stock's FX page
+    host_words[7] = full(20);
+    require(sdk_track5_screen() == 21 && sdk_track5_own() == 0, "FX page record read as an own page");
+    set_page(20, 0);
 
     // An effect the build lacks (21), or an ID out of range, means the first
     // effect, with its own defaults rather than the stored words.
@@ -251,15 +294,22 @@ int main() {
     publish();
     host_flag = 0;
     block();
-    require(built_count[20] == 1 && host_init_slot == 15, "Effect not built in FX II's slot");
+    require(built_count[20] == 1 && host_init_slot == 12, "Collection effect not built as Aux 5's");
     require(host_scratch_in_init == 0x84a00000 + 524288 && host_scratch == 0x84a00000, "Scratch not borrowed and restored");
     require(host_flag == 1, "Input flag doesn't follow the send");
     require(processed == 1 && last_effect == 20 && last_left0 == (1 << 9), "Effect didn't get the FX bus level");
     require(last_parameters[0] == 2000 && last_parameters[2] == 2002 && last_parameters[3] == 2003 &&
-            last_parameters[4] == 2004, "Parameters: words 4..6, then the effect's defaults");
+            last_parameters[4] == 2004, "Parameters: the eight control words");
+    // Before all eight were stored, the first three words, then the effect's defaults.
+    host_audio[37] = 1; host_audio[7] = tag(20);
+    block();
+    require(last_parameters[2] == 2002 && last_parameters[3] == 2003, "An old project read words past the third");
+    host_audio[37] = 2003; host_audio[7] = full(20);
+    block();
+    require(last_parameters[3] == 2003 && last_parameters[4] == 2004, "Stored controls not read");
     require(host_buffer[0] == (1 << 21) && host_buffer[127] == (1 << 21), "Return not back at the aux level");
     block();
-    require(built_count[20] == 1 && processed == 2, "Effect rebuilt without a change");
+    require(built_count[20] == 1 && processed == 4, "Effect rebuilt without a change");
 
     // The return saturates instead of wrapping.
     fill(0x60000000);
