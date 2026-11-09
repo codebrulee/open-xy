@@ -245,8 +245,8 @@ class TrackControl(unittest.TestCase):
         # Aux tracks are a service of their own: its hooks and MTP allowlist edits.
         aux_edits = [p for p in config()['patches'] if p.get('service') == 'aux']
         self.assertEqual(sorted(p.get('symbol', p['address']) for p in aux_edits),
-                         ['0x840ae308', '0x840ae32c', '0x840aedfc', '0x840aee6c', 'sdk_aux_key_hook',
-                          'sdk_aux_lfo_label_hook', 'sdk_aux_page_hook', 'sdk_aux_shift_m1_hook', 'sdk_aux_shift_track_hook', 'sdk_aux_turn_hook', 'sdk_cv_gate_on',
+                         ['0x840ae308', '0x840ae32c', '0x840aedfc', '0x840aee6c',
+                          'sdk_aux_lfo_label_hook', 'sdk_aux_shift_track_hook', 'sdk_cv_gate_on',
                           'sdk_cv_output', 'sdk_lfo_aux_publish'])
         for machines, used, aux_used in ((plain, False, False), ([hiding], True, False), ([steering], True, False),
                                          ([aux], True, True)):
@@ -334,6 +334,29 @@ class TrackControl(unittest.TestCase):
                 self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
                 result = subprocess.run([str(binary)], capture_output=True, text=True, timeout=30, **hidden)
                 self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    @unittest.skipUnless(HOST_CXX, 'No working host C++ compiler (set OPXY_TEST_HOST_CXX)')
+    def test_real_aux_controller_shares_its_sites(self):
+        # The four aux controller sites belong to no service: the aux service and
+        # FX III share them through aux_controller.cpp, linked in every build.
+        shared = [p for p in config()['patches'] if p.get('symbol') in
+                  ('sdk_aux_shift_m1_hook', 'sdk_aux_page_hook', 'sdk_aux_key_hook', 'sdk_aux_turn_hook')]
+        self.assertEqual(len(shared), 4)
+        self.assertTrue(all('service' not in p for p in shared))
+        for unit in ('aux_controller', 'aux_controller_hooks'):
+            self.assertIn(unit, native.SDK_UNITS)
+            self.assertNotIn(unit, native.UNIT_SERVICES)
+        platform = ROOT / 'sdk/platform/opxy-1.2.1'
+        with tempfile.TemporaryDirectory(prefix='aux-controller-') as directory:
+            binary = Path(directory) / ('test.exe' if os.name == 'nt' else 'test')
+            hidden = dict(creationflags=subprocess.CREATE_NO_WINDOW) if os.name == 'nt' else {}
+            result = subprocess.run([HOST_CXX, '-std=c++11', '-O2', '-Wall', '-Werror',
+                '-I' + str(platform), '-I' + str(ROOT / 'sdk/include'),
+                str(ROOT / 'tests/fixtures/aux_controller.cpp'), '-o', str(binary)],
+                capture_output=True, text=True, timeout=120, **hidden)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            result = subprocess.run([str(binary)], capture_output=True, text=True, timeout=30, **hidden)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
     def test_a_synth_can_hide_the_envelope_and_filter_pages(self):
         synth = copy.deepcopy(fixture('probesynth').definition)

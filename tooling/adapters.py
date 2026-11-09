@@ -509,6 +509,47 @@ def generate_project_companion_table(directory, machines):
     return expand('project_companion_table.cpp.in', dict(DECLARATIONS='\n'.join(declarations), MACHINES='\n'.join(rows)),
                   Path(directory) / 'project_companion_table.cpp')
 
+# FX III's list (track5_fx.hpp kFx3Limit): stock's six send effects and the collection's.
+FX3_LIMIT = 32
+STOCK_CATALOG = ROOT / 'profiles/opxy-1.2.1/content/op1_factory.json'
+
+
+def fx3_effects(machines, catalog=None):
+    """FX III's effects as (id expression, ready expression, label, eight Q31 defaults): the
+    stock catalog's fx_types, then each send effect in the collection, in its order."""
+    stock = json.loads(catalog if catalog is not None else STOCK_CATALOG.read_bytes())['fx_types']
+    rows = [(str(t['id']), 'nullptr', t['type'], t['default_params']) for t in stock]
+    rows += [(m.prefix + '_fx_id', m.prefix + '_ready', m.native_name, catalog_defaults(m.definition))
+             for m in machines if m.kind == 'effect']
+    require(len(rows) <= FX3_LIMIT, 'FX III lists at most %d effects' % FX3_LIMIT)
+    result = []
+    for number, ready, label, defaults in rows:
+        label = label[:15]
+        require(label and all(0x20 <= ord(c) < 0x7f for c in label) and len(defaults) == 8 and
+                all(isinstance(v, int) and 0 <= v <= 32767 for v in defaults), 'Invalid FX III effect')
+        result.append((number, ready, label, [v << 16 for v in defaults]))
+    return result
+
+
+def generate_track5_fx_table(directory, machines):
+    """FX III's effect list and the stock table facts it reads (track5_fx.hpp)."""
+    from .definitions import EFFECT_BUFFER_LIMIT
+    from .stock_tables import RECORD_BYTES
+    declarations, effects = [], []
+    for number, ready, label, defaults in fx3_effects(machines):
+        stock = ready == 'nullptr'
+        if not stock:
+            declarations += [f'extern const char {number}[] __asm__("{number}");',
+                             f'int {ready}() __asm__("{ready}");']
+        identity = f'reinterpret_cast<const char*>({number})' if stock else number
+        effects.append(f'    {{{identity}, {ready}, {json.dumps(label)}, {{{", ".join(map(str, defaults))}}}}},')
+    return expand('track5_fx_table.cpp.in', dict(DECLARATIONS='\n'.join(declarations), EFFECTS='\n'.join(effects),
+                                                 COUNT=len(effects), EFFECT_RECORDS=RELOCATED['EFFECT_RECORDS'],
+                                                 RECORD_BYTES=RECORD_BYTES, EFFECT_LIMIT=RELOCATED['EFFECT_LIMIT'],
+                                                 BUFFER_LIMIT=EFFECT_BUFFER_LIMIT),
+                  Path(directory) / 'track5_fx_table.cpp')
+
+
 # A send slot's stock scratch memory: scratch(slot, bytes) (0x8d50e048), as stock
 # delay and reverb use it, only for the two send slots (docs/abi-1.2.1.md).
 FX_BUFFER_INIT = '''    // Stock's per-send scratch memory, which stock delay and reverb use the same way.

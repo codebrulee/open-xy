@@ -1199,6 +1199,96 @@
     },
     {
       "kind": "hook",
+      "name": "FX III: Shift and Aux 5's key choose its effect",
+      "address": "0x8c08f624",
+      "file_offset": "0xc6860",
+      "length": 8,
+      "before": "a66c200501e80000",
+      "symbol": "sdk_track5_key",
+      "call": true
+    },
+    {
+      "kind": "hook",
+      "name": "FX III: the stock FX page reads Aux 5's controls",
+      "address": "0x8d53b5ac",
+      "file_offset": "0x172808",
+      "length": 4,
+      "before": "fce37ede",
+      "symbol": "sdk_track5_vector",
+      "call": true
+    },
+    {
+      "kind": "hook",
+      "name": "FX III: the stock FX page reads Aux 5's effect",
+      "address": "0x8d53b5c0",
+      "file_offset": "0x17281c",
+      "length": 4,
+      "before": "ffe39aff",
+      "symbol": "sdk_track5_effect",
+      "call": true
+    },
+    {
+      "kind": "hook",
+      "name": "FX III: the stock FX page names Aux 5's effect",
+      "address": "0x8d53b83e",
+      "file_offset": "0x172a9a",
+      "length": 4,
+      "before": "ffe37efe",
+      "symbol": "sdk_track5_name_call",
+      "call": true
+    },
+    {
+      "kind": "hook",
+      "name": "FX III: Aux 5's Input page shows the saved bypass",
+      "address": "0x8d5299a0",
+      "file_offset": "0x160bfc",
+      "length": 4,
+      "before": "fde3788d",
+      "symbol": "sdk_track5_shown",
+      "call": true
+    },
+    {
+      "kind": "hook",
+      "name": "FX III: Aux 5's Input page keeps its inputs group",
+      "address": "0x8d529730",
+      "file_offset": "0x16098c",
+      "length": 4,
+      "before": "ffe3ecb5",
+      "symbol": "sdk_track5_find_inputs",
+      "call": true
+    },
+    {
+      "kind": "hook",
+      "name": "FX III: Aux 5's Input page keeps its inactive inputs group",
+      "address": "0x8d529742",
+      "file_offset": "0x16099e",
+      "length": 4,
+      "before": "ffe3e3b5",
+      "symbol": "sdk_track5_find_inactive",
+      "call": true
+    },
+    {
+      "kind": "hook",
+      "name": "FX III: Aux 5's Input page shows send's own icon",
+      "address": "0x8d529a80",
+      "file_offset": "0x160cdc",
+      "length": 4,
+      "before": "02e378dc",
+      "symbol": "sdk_track5_icons",
+      "call": true
+    },
+    {
+      "kind": "hook",
+      "name": "FX III: encoder 1 on Aux 5's Input page toggles the saved bypass",
+      "address": "0x8c08f7d2",
+      "file_offset": "0xc6a0e",
+      "length": 8,
+      "before": "00de4d8d90b40000",
+      "symbol": "sdk_track5_click",
+      "call": true
+    },
+    {
+      "kind": "hook",
       "name": "LFO destination range on Element selector initialization",
       "address": "0x8d53f828",
       "file_offset": "0x176a84",
@@ -1615,25 +1705,33 @@
     },
     {
       "kind": "hook",
-      "name": "Shift + M1 on an aux track opens the machine chooser",
+      "name": "Aux 5's stage: its effect and timer around the mixer's call of its processor",
+      "address": "0x8d51234e",
+      "file_offset": "0x1495aa",
+      "length": 4,
+      "before": "ffe339ed",
+      "symbol": "sdk_aux5_call",
+      "call": true
+    },
+    {
+      "kind": "hook",
+      "name": "Shift + M1 on an aux track: the aux service's chooser, or FX III swapping its pages",
       "address": "0x8c08f6ec",
       "file_offset": "0xc6928",
       "length": 8,
       "before": "01e8000008601000",
       "symbol": "sdk_aux_shift_m1_hook",
-      "call": true,
-      "service": "aux"
+      "call": true
     },
     {
       "kind": "hook",
-      "name": "An aux track a machine holds shows the machine's page",
+      "name": "An aux track's page: a machine holding it, or FX III's effect page",
       "address": "0x8c08f540",
       "file_offset": "0xc677c",
       "length": 8,
       "before": "09da0a8434050000",
       "symbol": "sdk_aux_page_hook",
-      "call": true,
-      "service": "aux"
+      "call": true
     },
     {
       "kind": "hook",
@@ -1842,25 +1940,23 @@
     },
     {
       "kind": "hook",
-      "name": "Aux replacement owns page keys and encoder clicks",
+      "name": "Aux track page keys and encoder clicks: a machine holding the track; FX III watches M1",
       "address": "0x8c08fd30",
       "file_offset": "0xc6f6c",
       "length": 12,
       "before": "926982ce00c4419100003830",
       "symbol": "sdk_aux_key_hook",
-      "call": true,
-      "service": "aux"
+      "call": true
     },
     {
       "kind": "hook",
-      "name": "Aux replacement owns encoder routing before stock page translation",
+      "name": "Aux track encoders: a machine holding the track, or FX III's controls, before stock page translation",
       "address": "0x8c08fa14",
       "file_offset": "0xc6c50",
       "length": 8,
       "before": "0dda0a8434050000",
       "symbol": "sdk_aux_turn_hook",
-      "call": true,
-      "service": "aux"
+      "call": true
     },
     {
       "kind": "hook",

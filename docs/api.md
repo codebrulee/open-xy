@@ -1079,6 +1079,10 @@ void process(State& state, opxy::Channel left, opxy::Channel right,
              opxy::Parameters parameters);
 ```
 
+Every send effect in a build is also listed on FX III, the third send on aux
+track 5 ([firmware contract](abi-1.2.1.md#fx-iii)), where it runs as on FX II
+with its first three controls and the send's level on the four encoders.
+
 Stock constructs an effect in place in its send slot on the audio thread and
 calls `initialize`, which runs again on an engine reset, so keep it short;
 storage starts zeroed. `process` runs once per

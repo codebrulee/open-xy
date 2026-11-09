@@ -14,6 +14,9 @@ extern "C" {
 void sdk_synth_press(opxy::u32) __asm__("sdk_synth_press");
 opxy::u32 sdk_synth_turn(opxy::u32, opxy::u32, opxy::u32, opxy::u32) __asm__("sdk_synth_turn");
 opxy::u32 sdk_synth_scramble(opxy::u32, opxy::u32, opxy::u32, opxy::i32) __asm__("sdk_synth_scramble");
+// FX III's send page names nothing here (track5_fx.cpp).
+const char* sdk_track5_title(opxy::u32) __asm__("sdk_track5_title");
+const char* sdk_track5_title(opxy::u32) { return nullptr; }
 }
 namespace {
 using namespace opxy;
