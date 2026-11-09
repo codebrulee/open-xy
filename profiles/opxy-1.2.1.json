@@ -1787,7 +1787,8 @@
       "call": true,
       "service": "extensions",
       "events": [
-        "context"
+        "context",
+        "page_left"
       ]
     },
     {
@@ -1814,7 +1815,8 @@
       "service": "extensions",
       "events": [
         "input_activity",
-        "recordable_note_on"
+        "recordable_note_on",
+        "punch_in"
       ]
     },
     {
@@ -1827,7 +1829,8 @@
       "call": true,
       "service": "extensions",
       "events": [
-        "selected_note_off"
+        "selected_note_off",
+        "punch_in"
       ]
     },
     {
@@ -1867,6 +1870,214 @@
       "service": "extensions",
       "events": [
         "recordable_note_on"
+      ]
+    },
+    {
+      "kind": "hook",
+      "address": "0x8d595cf8",
+      "file_offset": "0x1ccf54",
+      "length": 4,
+      "before": "ffe3d2ef",
+      "symbol": "sdk_extensions_punch_record",
+      "call": true,
+      "service": "extensions",
+      "events": [
+        "punch_in"
+      ]
+    },
+    {
+      "kind": "hook",
+      "address": "0x8d598548",
+      "file_offset": "0x1cf7a4",
+      "length": 4,
+      "before": "ffe364fc",
+      "symbol": "sdk_extensions_scene_boundary",
+      "call": true,
+      "service": "extensions",
+      "events": [
+        "scene_boundary"
+      ]
+    },
+    {
+      "kind": "hook",
+      "address": "0x8d597e40",
+      "file_offset": "0x1cf09c",
+      "length": 4,
+      "before": "ffe3b66c",
+      "symbol": "sdk_extensions_scene_queued",
+      "call": true,
+      "service": "extensions",
+      "events": [
+        "scene_boundary"
+      ]
+    },
+    {
+      "kind": "hook",
+      "address": "0x8d597f02",
+      "file_offset": "0x1cf15e",
+      "length": 4,
+      "before": "ffe3556c",
+      "symbol": "sdk_extensions_scene_song",
+      "call": true,
+      "service": "extensions",
+      "events": [
+        "scene_boundary"
+      ]
+    },
+    {
+      "kind": "hook",
+      "address": "0x8d59350c",
+      "file_offset": "0x1ca768",
+      "length": 4,
+      "before": "ffe3448f",
+      "symbol": "sdk_extensions_mute_keys",
+      "call": true,
+      "service": "extensions",
+      "events": [
+        "track_mute"
+      ]
+    },
+    {
+      "kind": "hook",
+      "address": "0x8d593514",
+      "file_offset": "0x1ca770",
+      "length": 4,
+      "before": "fae3df49",
+      "symbol": "sdk_extensions_mute_dsp",
+      "call": true,
+      "service": "extensions",
+      "events": [
+        "track_mute"
+      ]
+    },
+    {
+      "kind": "hook",
+      "address": "0x8c093a60",
+      "file_offset": "0xcac9c",
+      "length": 8,
+      "before": "00de588d94530000",
+      "symbol": "sdk_extensions_mute_mixer",
+      "call": true,
+      "service": "extensions",
+      "events": [
+        "track_mute"
+      ]
+    },
+    {
+      "kind": "hook",
+      "address": "0x8c095d1a",
+      "file_offset": "0xccf56",
+      "length": 8,
+      "before": "00de588dac570000",
+      "symbol": "sdk_extensions_scene_select",
+      "call": true,
+      "service": "extensions",
+      "events": [
+        "scene_select"
+      ]
+    },
+    {
+      "kind": "hook",
+      "address": "0x8c095d22",
+      "file_offset": "0xccf5e",
+      "length": 8,
+      "before": "00de588de85e0000",
+      "symbol": "sdk_extensions_scene_switched",
+      "call": true,
+      "service": "extensions",
+      "events": [
+        "scene_select"
+      ]
+    },
+    {
+      "kind": "hook",
+      "address": "0x8c095d36",
+      "file_offset": "0xccf72",
+      "length": 8,
+      "before": "00de598dd07a0000",
+      "symbol": "sdk_extensions_scene_jump",
+      "call": true,
+      "service": "extensions",
+      "events": [
+        "scene_select"
+      ]
+    },
+    {
+      "kind": "hook",
+      "address": "0x8d58e8d2",
+      "file_offset": "0x1c5b2e",
+      "length": 4,
+      "before": "ffe36db7",
+      "symbol": "sdk_extensions_scene_select",
+      "call": true,
+      "service": "extensions",
+      "events": [
+        "scene_select"
+      ]
+    },
+    {
+      "kind": "hook",
+      "address": "0x8d58e8e2",
+      "file_offset": "0x1c5b3e",
+      "length": 4,
+      "before": "00e3f748",
+      "symbol": "sdk_extensions_scene_jump",
+      "call": true,
+      "service": "extensions",
+      "events": [
+        "scene_select"
+      ]
+    },
+    {
+      "kind": "hook",
+      "address": "0x8d58e90a",
+      "file_offset": "0x1c5b66",
+      "length": 4,
+      "before": "ffe351b7",
+      "symbol": "sdk_extensions_scene_select",
+      "call": true,
+      "service": "extensions",
+      "events": [
+        "scene_select"
+      ]
+    },
+    {
+      "kind": "hook",
+      "address": "0x8d58e91a",
+      "file_offset": "0x1c5b76",
+      "length": 4,
+      "before": "00e3db48",
+      "symbol": "sdk_extensions_scene_jump",
+      "call": true,
+      "service": "extensions",
+      "events": [
+        "scene_select"
+      ]
+    },
+    {
+      "kind": "hook",
+      "address": "0x8d58e93c",
+      "file_offset": "0x1c5b98",
+      "length": 4,
+      "before": "ffe338b7",
+      "symbol": "sdk_extensions_scene_select",
+      "call": true,
+      "service": "extensions",
+      "events": [
+        "scene_select"
+      ]
+    },
+    {
+      "kind": "hook",
+      "address": "0x8d58e94c",
+      "file_offset": "0x1c5ba8",
+      "length": 4,
+      "before": "00e3c248",
+      "symbol": "sdk_extensions_scene_jump",
+      "call": true,
+      "service": "extensions",
+      "events": [
+        "scene_select"
       ]
     },
     {

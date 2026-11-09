@@ -158,7 +158,8 @@ def export(package, output, tools, preview_cxx='clang++', *, stock_catalog, pers
                extensions=extensions.metadata(native.extensions_of(machines),
                                               extension_origins(native.extensions_of(machines), personal)),
                stockCatalog=base64.b64encode(stock_catalog).decode('ascii'),
-               screenTemplate=screen.template().decode('utf-8'))
+               screenTemplate=screen.template().decode('utf-8'),
+               overlayArtwork=(ROOT / native.OVERLAY_ARTWORK).read_text(encoding='utf-8'))
     fallbacks = native.service_fallbacks(native.active_services(profile, native.service_users(machines)))
     if fallbacks:
         kit['serviceFallbacks'] = fallbacks
@@ -179,6 +180,9 @@ def export(package, output, tools, preview_cxx='clang++', *, stock_catalog, pers
 def write_builder(kit, output):
     """Bundle reviewed data and the shared UI without recompiling machine code."""
     require(kit.get('screenTemplate') == screen.template().decode('utf-8'), 'Unsupported platform screen template')
+    require('overlayArtwork' not in kit or
+            kit['overlayArtwork'] == (ROOT / native.OVERLAY_ARTWORK).read_text(encoding='utf-8'),
+            'Unsupported overlay artwork')
     if 'stockCatalog' in kit:
         catalog = base64.b64decode(kit['stockCatalog'], validate=True)
         require(sha(catalog) == kit['profile']['stock_catalog_sha256'], 'Bundled stock catalog hash mismatch')

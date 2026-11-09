@@ -48,15 +48,31 @@ bool ready() {
     entries = list;
     registry = &known;
     entry_count = count;
+    extension_started();
     return true;
 }
 
-// Actions granted while a claimed key fires and stock accepted it.
-u32 granted(const ExtensionEntry& entry, const extensions::Control& control) {
+bool holds(ClaimHeld wanted, bool held) { return wanted == ClaimHeld::any || (wanted == ClaimHeld::held) == held; }
+bool on_page(const ClaimSpec& claim, u32 page) {
+    if (!claim.page_count) return true;
+    for (u32 i = 0; i < claim.page_count && i < pages_per_claim; ++i)
+        if (claim.pages[i] == page) return true;
+    return false;
+}
+bool matches(const ClaimSpec& claim, const extensions::Control& control, const ClaimState& state) {
+    return claim.key == control.key && on_page(claim, state.page) &&
+           holds(claim.record, state.record_held) && holds(claim.shift, state.shift_held);
+}
+// The entry's claims this key fires; stock (or, replaced, the key) took it.
+u32 fired_claims(const ExtensionEntry& entry, const extensions::Control& control, const ClaimState& state) {
     if (!control.accepted) return 0;
     u32 fired = 0;
     for (u32 c = 0; c < registry->claim_count; ++c)
-        if ((entry.claims & (1u << c)) && registry->claim_keys[c] == control.key) fired |= 1u << c;
+        if ((entry.claims & (1u << c)) && matches(registry->claims[c], control, state)) fired |= 1u << c;
+    return fired;
+}
+// Actions granted while a claimed key fires.
+u32 granted(const ExtensionEntry& entry, u32 fired) {
     u32 result = 0;
     for (u32 a = 0; fired && a < registry->action_count; ++a) {
         const u32 needs = registry->action_claims[a] ? registry->action_claims[a] : entry.claims;
@@ -99,16 +115,182 @@ u32 insert_notes(const extensions::Context& expected, u32 track, const RecordedN
 u32 replace_notes(const extensions::Context& expected, u32 track, const RecordedNote* notes, u32 count) {
     return write_notes(expected, track, notes, count, true);
 }
-const extensions::Actions actions = {insert_notes, notify, replace_notes};
+namespace arr = extensions::arrangement;
+// The caller's project is the current one, and stock is stopped.
+bool same_project(const extensions::Context& expected) {
+    bool playing = false;
+    const RecordingContext now = extension_context(playing);
+    return now.project && now.project == expected.recording.project &&
+           now.project == current.recording.project && !playing && !current.playing;
+}
+bool read_arrangement(const extensions::Context& expected, extensions::Arrangement& out) {
+    if (!(transaction.granted & action_read_arrangement)) return false;
+    bool playing = false;
+    const RecordingContext now = extension_context(playing);
+    if (!now.project || now.project != expected.recording.project || now.project != current.recording.project)
+        return false;
+    if (!extension_read_arrangement(out)) return false;
+    out.project = now.project;
+    return true;
+}
+bool valid_row(const extensions::SceneRow& row) {
+    for (u32 t = 0; t < arr::tracks; ++t)
+        if (row.pattern[t] >= arr::patterns || (row.mute[t] != arr::muted && row.mute[t] != arr::unmuted))
+            return false;
+    return true;
+}
+// New pattern slots: on an aux track, in order, each note sane (the adapter
+// checks slots and lengths against the project).
+bool valid_patterns(const extensions::ArrangementWrite& w) {
+    if (!w.pattern_count) return true;
+    if (w.pattern_count >= arr::patterns || !w.patterns || w.pattern_track < 8 || w.pattern_track >= arr::tracks)
+        return false;
+    for (u32 i = 0; i < w.pattern_count; ++i) {
+        const extensions::PatternWrite& p = w.patterns[i];
+        if (p.slot >= arr::patterns || (i && p.slot != w.patterns[i - 1].slot + 1) || p.from >= p.slot ||
+            p.count > 120 || (p.count && !p.notes)) return false;
+        for (u32 n = 0; n < p.count; ++n)
+            if (p.notes[n].position < 0 || !p.notes[n].length || p.notes[n].pitch > 127 || !p.notes[n].velocity ||
+                p.notes[n].velocity > 127) return false;
+    }
+    return true;
+}
+extensions::Write write_arrangement(const extensions::Context& expected, const extensions::ArrangementWrite& w) {
+    using extensions::Write;
+    if (!(transaction.granted & action_write_arrangement) || transaction.attempted) return Write::refused;
+    const extensions::Arrangement* before = w.before;
+    if (!before || before->project != current.recording.project) return Write::refused;
+    bool playing = false;
+    extension_context(playing);
+    if (playing || current.playing) return Write::playing;
+    if (!same_project(expected)) return Write::refused;
+    if (w.song >= arr::songs || !w.entries || !w.length || w.length > arr::entries || w.new_count > arr::scenes ||
+        (w.new_count && (!w.new_slots || !w.new_scenes)))
+        return Write::invalid;
+    if (!w.replace && !extensions::blank(before->song[w.song])) return Write::song_taken;
+    bool fresh[arr::scenes] = {};
+    for (u32 i = 0; i < w.new_count; ++i) {
+        const u32 slot = w.new_slots[i];
+        if (slot >= arr::scenes || fresh[slot] || !valid_row(w.new_scenes[i])) return Write::invalid;
+        if (before->scene[slot].present) return Write::scene_taken;
+        fresh[slot] = true;
+    }
+    for (u32 i = 0; i < w.length; ++i)
+        if (w.entries[i] >= arr::scenes || !(before->scene[w.entries[i]].present || fresh[w.entries[i]]))
+            return Write::invalid;
+    for (u32 s = 0; s < arr::scenes; ++s)
+        if (before->scene[s].present && !valid_row(before->scene[s])) return Write::invalid;
+    if (!valid_patterns(w)) return Write::invalid;
+    transaction.attempted = true;
+    return extension_write_arrangement(w);
+}
+// The written song's shape, as write_arrangement checked it; the adapter then
+// checks the project still holds exactly what was written.
+extensions::Undo undo_arrangement(const extensions::Context& expected, const extensions::ArrangementWrite& w) {
+    using extensions::Undo;
+    if (!(transaction.granted & action_undo_arrangement) || transaction.attempted) return Undo::refused;
+    const extensions::Arrangement* before = w.before;
+    if (!before || before->project != current.recording.project) return Undo::refused;
+    bool playing = false;
+    extension_context(playing);
+    if (playing || current.playing) return Undo::playing;
+    if (!same_project(expected)) return Undo::refused;
+    if (w.song >= arr::songs || !w.entries || !w.length || w.length > arr::entries || w.new_count > arr::scenes ||
+        (w.new_count && (!w.new_slots || !w.new_scenes)))
+        return Undo::refused;
+    bool seen[arr::scenes] = {};
+    for (u32 i = 0; i < w.new_count; ++i) {
+        const u32 slot = w.new_slots[i];
+        if (slot >= arr::scenes || seen[slot] || before->scene[slot].present) return Undo::refused;
+        seen[slot] = true;
+    }
+    if (!valid_patterns(w)) return Undo::refused;
+    transaction.attempted = true;
+    return extension_undo_arrangement(w);
+}
+bool stop_song(const extensions::Context& expected) {
+    if (!(transaction.granted & action_stop_song)) return false;
+    bool playing = false;
+    const RecordingContext now = extension_context(playing);
+    if (!now.project || now.project != expected.recording.project || now.project != current.recording.project)
+        return false;
+    return extension_stop_song();
+}
+bool disarm_record(const extensions::Context& expected) {
+    if (!(transaction.granted & action_disarm_record)) return false;
+    bool playing = false;
+    const RecordingContext now = extension_context(playing);
+    if (!now.project || now.project != expected.recording.project || now.project != current.recording.project)
+        return false;
+    return extension_disarm_record();
+}
+bool read_pattern(const extensions::Context& expected, u32 track, u32 slot, extensions::PatternRead& out) {
+    if (!(transaction.granted & action_read_pattern) || track < 8 || track >= arr::tracks || slot >= 16) return false;
+    bool playing = false;
+    const RecordingContext now = extension_context(playing);
+    if (!now.project || now.project != expected.recording.project || now.project != current.recording.project)
+        return false;
+    return extension_read_pattern(track, slot, out);
+}
+bool play_song(const extensions::Context& expected) {
+    if (!(transaction.granted & action_play_song)) return false;
+    bool playing = false;
+    const RecordingContext now = extension_context(playing);
+    if (!now.project || now.project != expected.recording.project || now.project != current.recording.project)
+        return false;
+    return extension_play_song(playing);
+}
+bool hold_song_end(const extensions::Context& expected) {
+    if (!(transaction.granted & action_hold_song_end)) return false;
+    bool playing = false;
+    const RecordingContext now = extension_context(playing);
+    if (!now.project || now.project != expected.recording.project || now.project != current.recording.project)
+        return false;
+    return extension_hold_song_end();
+}
+const extensions::Actions actions = {insert_notes, notify, replace_notes, read_arrangement, write_arrangement,
+                                     undo_arrangement, stop_song, disarm_record, hold_song_end,
+                                     read_pattern, play_song};
+
+// The page left, to every page_left subscriber: actions as for a key of the
+// first of its claims limited to pages that covers the page left.
+void page_left(u32 page) {
+    dispatching = true;
+    for (u32 i = 0; i < entry_count; ++i) {
+        if (!entries[i].hooks->page_left) continue;
+        extensions::PageLeft left = {page, nullptr};
+        u32 fired = 0;
+        for (u32 c = 0; c < registry->claim_count && !fired; ++c) {
+            const ClaimSpec& claim = registry->claims[c];
+            if ((entries[i].claims & (1u << c)) && claim.page_count && on_page(claim, page)) {
+                fired = 1u << c;
+                left.claim = claim.name;
+            }
+        }
+        transaction = {granted(entries[i], fired), false, false};
+        entries[i].hooks->page_left(current, left, actions);
+        transaction = {0, false, false};
+    }
+    dispatching = false;
+}
+bool page_seen;
+u32 last_page;
 }
 
 void extensions_sync() {
     if (dispatching || !ready()) return;
     current.recording = extension_context(current.playing);
+    current.record_armed = extension_record_armed();
+    current.page = extension_page();
     dispatching = true;
     for (u32 i = 0; i < entry_count; ++i)
         if (entries[i].hooks->context) entries[i].hooks->context(current);
     dispatching = false;
+    const u32 left = last_page;
+    const bool changed = page_seen && current.page != left;
+    page_seen = true;
+    last_page = current.page;
+    if (changed) page_left(left);
 }
 void extensions_input_activity() {
     if (dispatching || !ready()) return;
@@ -154,16 +336,90 @@ void extensions_recording_tick(u32 delta) {
         if (entries[i].hooks->recording_tick) entries[i].hooks->recording_tick(current, tick);
     dispatching = false;
 }
-void extensions_queued_control(const extensions::Control& control) {
+bool extensions_replaces(const extensions::Control& control, const ClaimState& state) {
+    if (dispatching || !ready()) return false;
+    for (u32 i = 0; i < entry_count; ++i) {
+        const u32 fired = fired_claims(entries[i], control, state);
+        for (u32 c = 0; c < registry->claim_count; ++c)
+            if ((fired & (1u << c)) && registry->claims[c].replaces) return true;
+    }
+    return false;
+}
+void extensions_queued_control(const extensions::Control& control, const ClaimState& state) {
     if (dispatching) return;
     extensions_sync();
     if (!entries) return;
     dispatching = true;
     for (u32 i = 0; i < entry_count; ++i) {
-        transaction = {granted(entries[i], control), false, false};
-        if (entries[i].hooks->queued_control) entries[i].hooks->queued_control(current, control, actions);
+        const u32 fired = fired_claims(entries[i], control, state);
+        extensions::Control event = control;
+        event.claim = nullptr;
+        for (u32 c = 0; c < registry->claim_count && !event.claim; ++c)
+            if (fired & (1u << c)) event.claim = registry->claims[c].name;
+        transaction = {granted(entries[i], fired), false, false};
+        if (entries[i].hooks->queued_control) entries[i].hooks->queued_control(current, event, actions);
         transaction = {0, false, false};
     }
     dispatching = false;
+}
+void extensions_scene_boundary(const extensions::SceneBoundary& boundary) {
+    if (dispatching) return;
+    extensions_sync();
+    if (!entries || !current.playing) return;
+    dispatching = true;
+    for (u32 i = 0; i < entry_count; ++i)
+        if (entries[i].hooks->scene_boundary) entries[i].hooks->scene_boundary(current, boundary);
+    dispatching = false;
+}
+bool extensions_track_mute(const extensions::TrackMute& mute) {
+    if (dispatching) return false;
+    extensions_sync();
+    if (!entries) return false;
+    bool hold = false;
+    dispatching = true;
+    for (u32 i = 0; i < entry_count; ++i)
+        if (entries[i].hooks->track_mute &&
+            entries[i].hooks->track_mute(current, mute) == extensions::MuteTiming::next_boundary) hold = true;
+    dispatching = false;
+    return hold && current.playing && !mute.cancels_held;
+}
+bool extensions_scene_select(const extensions::SceneSelect& select) {
+    if (dispatching) return false;
+    extensions_sync();
+    if (!entries) return false;
+    bool hold = false;
+    dispatching = true;
+    for (u32 i = 0; i < entry_count; ++i)
+        if (entries[i].hooks->scene_select &&
+            entries[i].hooks->scene_select(current, select) == extensions::SceneTiming::next_boundary) hold = true;
+    dispatching = false;
+    return hold && current.playing;
+}
+extensions::Indicator extensions_indicator() {
+    using extensions::Indicator;
+    static Indicator last = Indicator::none;
+    if (dispatching || !entries) return entries ? last : Indicator::none;
+    Indicator shown = Indicator::none;
+    dispatching = true;
+    for (u32 i = 0; i < entry_count; ++i) {
+        if (!entries[i].hooks->indicator) continue;
+        const Indicator wanted = entries[i].hooks->indicator(current);
+        if (wanted == Indicator::running || (wanted == Indicator::armed && shown == Indicator::none)) shown = wanted;
+    }
+    dispatching = false;
+    last = shown;
+    return shown;
+}
+bool extensions_punch_in(const extensions::PunchIn& punch) {
+    if (dispatching) return false;
+    extensions_sync();
+    if (!entries) return false;
+    bool skip = false;
+    dispatching = true;
+    for (u32 i = 0; i < entry_count; ++i)
+        if (entries[i].hooks->punch_in &&
+            entries[i].hooks->punch_in(current, punch) == extensions::PunchRecording::skip) skip = true;
+    dispatching = false;
+    return skip && punch.pressed;
 }
 }}

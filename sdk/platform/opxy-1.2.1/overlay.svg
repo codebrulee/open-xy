@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="480" height="220" viewBox="0 0 480 220">
+  <!-- The SDK's overlay over every page (overlay.hpp), installed as
+       content/display/openxy_overlay.svg: one group per client, hidden until it
+       shows it. -->
+  <g id="recorder">
+    <path fill="#000000" d="M416,4h60v26h-60z"/>
+    <path fill="#F91400" d="M438,17c0,4.4-3.6,8-8,8s-8-3.6-8-8s3.6-8,8-8S438,12.6,438,17z"/>
+    <g id="rec_armed">
+      <path fill="#CDCDCD" d="M447,9h6v16h-6z"/>
+      <path fill="#CDCDCD" d="M459,9h6v16h-6z"/>
+    </g>
+    <g id="rec_running">
+      <path fill="#CDCDCD" d="M447,8l20,9l-20,9z"/>
+    </g>
+    <g id="rec_stopped">
+      <path fill="#CDCDCD" d="M448,10h14v14h-14z"/>
+    </g>
+  </g>
+</svg>
