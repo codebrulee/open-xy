@@ -36,6 +36,13 @@ extern const DboxRender sdk_dbox_methods[4] __asm__("sdk_dbox_methods");
 const void* sdk_drumline_service() __asm__("sdk_drumline_service");
 }
 
+// FX III's send page names nothing here (track5_fx.cpp, not linked).
+extern "C" {
+const char* sdk_track5_title(opxy::u32) __asm__("sdk_track5_title");
+const char* sdk_track5_title(opxy::u32) { return nullptr; }
+opxy::u32 sdk_track5_own() __asm__("sdk_track5_own");
+opxy::u32 sdk_track5_own() { return 0; }
+}
 // drum_send.cpp's, which this fixture does not link.
 opxy::u16 sdk_drum_send_dbox[opxy::platform::kDboxVoices];
 // The step-lock handles (lock_handles.cpp), which this fixture does not link:
