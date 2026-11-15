@@ -1,5 +1,5 @@
 {
-  "schema": 3,
+  "schema": 4,
   "claims": {
     "record_double_tap": {"label": "Record double-tap", "key": 50},
     "performance_play": {"label": "Play on the arranger or song page", "key": 51, "pages": [47, 48, 49], "record": "released"},
@@ -18,5 +18,9 @@
     "hold_song_end": {"requires": "performance_play"},
     "read_pattern": {"requires": ["performance_play", "performance_stop"]},
     "play_song": {"requires": ["performance_play", "performance_arm"]}
+  },
+  "capabilities": {
+    "long_samples": {},
+    "release_floor": {"setting": {"label": "Idle threshold", "unit": "dB", "minimum": -66, "maximum": -20, "default": -48}}
   }
 }
