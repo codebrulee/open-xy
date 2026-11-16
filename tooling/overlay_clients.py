@@ -7,7 +7,9 @@ from pathlib import Path
 from .formats import require
 
 # (unit, client): the unit that defines the client, a const overlay::Client.
-CLIENTS = ()
+CLIENTS = (
+    ('cpu_overlay', 'sdk_cpu_overlay'),  # the cpu meter's indicator and breakdown
+)
 
 
 def render(units, clients=CLIENTS):

@@ -1,0 +1,25 @@
+// Generated: what runs at Aux 5's processor call (aux5_stage.s). The effect
+// gets the processor's arguments and the mixer's aux bus before stock's
+// processor runs; the timer gets the CYCLES count either side of both. Each is
+// a unit's entry point when the build links that unit, and nothing otherwise
+// (tooling/aux5_stage.py).
+#include <opxy/types.hpp>
+
+using opxy::u32;
+using opxy::i32;
+
+extern "C" {
+@DECLARATIONS@
+void sdk_aux5_effect(u32 a, u32 b, const i32* bus) __asm__("sdk_aux5_effect");
+void sdk_aux5_time(u32 start, u32 end) __asm__("sdk_aux5_time");
+}
+
+void sdk_aux5_effect(u32 a, u32 b, const i32* bus) {
+    (void)a; (void)b; (void)bus;
+@EFFECT@
+}
+
+void sdk_aux5_time(u32 start, u32 end) {
+    (void)start; (void)end;
+@TIMER@
+}

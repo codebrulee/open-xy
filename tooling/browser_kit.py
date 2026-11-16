@@ -149,6 +149,9 @@ def export(package, output, tools, preview_cxx='clang++', *, stock_catalog, pers
                                                             'kit_absent')}
     if 'aux' in services:
         kit.setdefault('serviceFallbacks', {})['aux'] = {'sdk_aux_startup': 'kit_absent'}
+    # The master stage: stock's EQ while a selection has no master processor.
+    if 'master_filter' in services:
+        kit.setdefault('serviceFallbacks', {})['master_filter'] = {'sdk_master_process': 'sdk_master_stock_stage'}
     kit_path = output / 'kit.json'
     kit_path.write_text(json.dumps(kit, separators=(',', ':')), encoding='utf-8')
     # Reference validation exercises every subset against GNU ld. Failure leaves

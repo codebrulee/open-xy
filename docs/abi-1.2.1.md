@@ -40,12 +40,14 @@ version is rejected. The output differs from stock in exactly these places:
 | Synth and effect controls | 8 | Lets an encoder press on an owned synth's or send effect's page select an alternate parameter, which its turns, titles and values then follow; scales fine turns on owned synth and send-effect pages; steps owned enums one choice per detent; names owned enums' choices, and an owned effect's division values on the send page; extends the track menu's scramble to an owned synth's alternates |
 | LFO destinations | 15 | Selects and modulates all declared engine parameters on owned instrument machines with five to eight parameters, using their assigned encoder icons |
 | Display note releases | 2 | Observes both stock note-off map updates while preserving their original calls |
-| Project companions | 7 | Writes a [companion](projects.md) after every project save, maps a project's machine numbers through its companion on every load, gives track control machines what they kept after every load (and nothing after a new project), and shows companions beside projects over MTP |
+| Project companions | 7 | Writes a [companion](projects.md) after every project save, maps a project's machine numbers through its companion on every load, gives track control machines what they kept after every load (and nothing after a new project) and the cpu meter its project's indicator setting, and shows companions beside projects over MTP |
+| CPU meter | 12 | Times the DSP callback, each track's synth voices and the mixer's tape, FX I, FX II and master stages, and aux 5 as [Aux 5's stage](#aux-5-stage) timer; answers the main board's poll (bridge command 0x34 tagged 0x5ec5) in the DSP board's dispatcher; adds Project > M4 > cpu through the prefs list and four voices-renderer sites. Its indicator and breakdown are the SDK's overlay, a screen in the last page slot, which no machine is given ([profiling](profiling.md#load-while-you-play)) |
 | Diagnostic benchmark | 1 | Extends explicit command 0xc8 with the selected machines; no normal-playback callbacks added |
 | Per-voice profiling | 10 optional | Bypasses diagnostic timing in both stock voice renderers when built with profiling off |
 | Track control | 6 | Runs a synth's track control once per GUI tick, after stock's own call at that site, notes encoder edits, shows its overlays as parameter values, and keeps overlays off a parameter a step's lock holds (three lock writes) |
 | Aux tracks | 13 | Lets a track control machine take over aux track 12 (CV): its chooser on Shift + M1 (the effect list on the sends), its presets on Shift + track key, its page on M1, its parameter names on the LFO's destinations, its own LFO whichever track is selected, and CV and gate kept silent; four MTP allowlist edits show the user's aux presets |
 | Preset scan | 1 | Hides factory presets whose engine the build does not install ([presets](#presets)) |
+| Aux 5 stage | 1 | Gives the mixer's call of Aux 5's processor one owner, which runs the build's aux 5 effect before it and times both ([Aux 5 stage](#aux-5-stage)) |
 | Startup label | 1 | Shows `OPEN <version>-1.2.1` at boot, `<version>` from [`VERSION`](../VERSION), through the stock startup text renderer |
 | Extension events | 13 | Observes live input, stock transport, queued controls, scene boundaries and mutes for extensions, can hold a mute until the next scene boundary, and lets a Record double-tap owner edit notes through stock editing and undo; linked only when an extension is selected |
 | Module | 1 record | One loader block holding the linked module |
@@ -953,6 +955,21 @@ supplies only wet audio. The generated adapter exposes the machine's declared
 absent-object fallback. This is a source-mixer control, not a wet/dry crossfade
 inside the effect. See the [effect API](api.md#effects).
 
+## Aux 5 stage
+
+`8d51234e` is the mixer's call of Aux 5's audio processor `8d50fdc0`, once per
+block, after it has summed tracks 1-8 into the aux bus. The SDK replaces it with
+`sdk_aux5_call` ([`aux5_hooks.s`](../sdk/platform/opxy-1.2.1/aux5_hooks.s)),
+which calls two slots around the processor: an **effect**, given the
+processor's first two arguments and the aux bus (64 interleaved stereo frames,
+whose address the mixer keeps at `[SP + 0x54]`), and a **timer**, given the
+`CYCLES` count before the effect and after the processor. The processor itself
+gets the caller's arguments unchanged. Features reach this site through
+[`tooling/aux5_stage.py`](../tooling/aux5_stage.py), never with a hook of their
+own: each slot names the SDK unit that fills it, and the generated
+`aux5_stage.cpp` calls it only in builds that link that unit. An empty slot
+does nothing.
+
 ## Synthesis drum transport
 
 An owned `drum` registration uses flag 1, its own engine ID and drawing page.
@@ -1113,9 +1130,12 @@ control's choice as a ninth to twelfth.
 
 The conditional `master_filter` service redirects these stock 1.2.1 sites.
 Eight-byte entry branches replay their exact original prologues in adapter
-trampolines before resuming stock. Four-byte call sites remain relative; the
-master audio call retains its eight-byte absolute footprint. The existing
-project save/deserialize hooks are shared, not replaced or duplicated.
+trampolines before resuming stock. Four-byte call sites remain relative. The
+existing project save/deserialize hooks are shared, not replaced or duplicated.
+The master audio call is the cpu meter's, in every build. It times
+`sdk_master_stage`, which startup defines as `sdk_master_process` when the
+build links this service and as stock's EQ otherwise. A browser selection
+without a master processor resolves `sdk_master_process` to stock's EQ.
 
 | Site | Purpose | Original bytes |
 | --- | --- | --- |
@@ -1123,7 +1143,7 @@ project save/deserialize hooks are shared, not replaced or duplicated.
 | `8c09392c` | MIX Shift buttons entry | `093200e803006160` |
 | `8c093888` | MIX encoder entry | `4360990900e80300` |
 | `8d537d04` | EQ frame entry | `00e82400e305666f` |
-| `8d511b80` | Master stereo EQ processing call | `00dea011102c0000` |
+| `8d511b80` | Master stereo EQ processing call (the cpu meter's hook, in every build) | `00dea011102c0000` |
 | `8d5b145e` | B3 parameter receiver call | `fae397eb` |
 | `8d598a3c` | Active project publication getter call | `ffe3ea5b` |
 | `8d588114` | New-project preparation entry | `00e80c15e305666f` |

@@ -10,7 +10,7 @@ export const selectArtwork = Graphics.selectArtwork;
 // The init preset's authored settings, shared with tooling.adapters.default_preset
 // (write_builder inlines this same file's content for the offline export).
 import DEFAULT_PRESET_TEMPLATE from '../tooling/default_preset.json' with { type: 'json' };
-export const PROFILE_SHA256 = '38bcc3605d735d574255b807fb64fe73b3435f452a0e86512519d667fb34f0a6';
+export const PROFILE_SHA256 = '1763bc50d040d773e7160f96dc46f0a0b7dfa1260a09a45a12df079c5a3bdb3f';
 export function requireThat(ok, message) { if (!ok) throw new Error(message); }
 const check = requireThat;
 const utf8 = new TextEncoder();

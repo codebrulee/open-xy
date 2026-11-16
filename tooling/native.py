@@ -18,7 +18,7 @@ import sys
 import tempfile
 import xml.etree.ElementTree as ET
 
-from . import benchmark, extensions, runtime, screen, startup_label, stock_tables
+from . import aux5_stage, benchmark, extensions, runtime, screen, startup_label, stock_tables
 from .adapters import (aux_preset_files, catalog_entry, check_aux_presets, generate_control, generate_display, generate_fx_object,
                        generate_player_object, generate_player_table, generate_registration,
                        generate_registration_stock, generate_sample_voice,
@@ -215,7 +215,8 @@ SDK_UNITS = ('divide', 'memory', 'registration', 'registration_stock', 'startup'
              'sample_cache_hooks', 'sample_progress', 'sample_progress_stock', 'pad_assignment',
              'pad_assignment_stock', 'drum_page', 'drum_controls_stock', 'sample_slice_clock', 'drum_display_stock', 'screen_order',
              'screen_hooks', 'synth_controls', 'synth_control_table', 'note_activity', 'project_companion',
-             'project_companion_table', 'profiling', 'lfo', 'lfo_stock', 'lfo_hooks', 'stock_browser',
+             'project_companion_table', 'profiling', 'lfo', 'lfo_stock', 'lfo_hooks', 'aux5_stage', 'aux5_hooks',
+             'cpu_meter', 'cpu_meter_hooks', 'cpu_overlay', 'stock_browser',
              'extension_runtime', 'extension_collection', 'extension_stock', 'extension_overlay', 'track_control',
              'track_control_table', 'track_control_hooks', 'track_control_project',
              'synth_pages', 'aux_tracks', 'aux_hooks', 'presets', 'overlay', 'overlay_clients',
@@ -471,6 +472,8 @@ def compile_collection(directory, toolchain, compiler, profile, machines, defini
                 return cxx(str(generate_project_companion_table(folder, machines)), obj)
             if step == 'track_control_table':
                 return cxx(str(generate_track_controls(folder, machines)), obj)
+            if step == 'aux5_stage':
+                return cxx(str(aux5_stage.generate(folder, {u for _n, x, u in plan(machines, profile) if x is None})), obj)
             if step == 'registration_stock':
                 return cxx(str(generate_registration_stock(folder)), obj)
             if step == 'divide':
@@ -489,7 +492,8 @@ def compile_collection(directory, toolchain, compiler, profile, machines, defini
                                                 [x.prefix for x in sample_engines if x.display != 'stock'],
                                                 effect_screens=[x.prefix for x in effects if x.display != 'stock'],
                                                 player_pages=[x.prefix for x in by_kind(machines, 'player')],
-                                                control='control' in services, aux='aux' in services)), obj)
+                                                control='control' in services, aux='aux' in services,
+                                                master='master_filter' in services)), obj)
             if (ROOT / TEMPLATES / (step + '.cpp')).is_file():
                 return cxx(TEMPLATES + step + '.cpp', obj)
             return assemble_unit(ROOT / TEMPLATES / (step + '.s'), obj)
@@ -649,8 +653,9 @@ def audio_stack_bounds(disassembly, module, base, symbols, machines):
         entries = [word(symbols[table]['value'] + offset) for offset in slots]
         require(all(entry in body for entry in entries), 'Audio entry of ' + m.id + ' is not a function start')
         bounds[m.id] = max(depth(entry) for entry in entries)
+    # The master processor runs inside the cpu meter's timing of the master stage.
     if 'sdk_master_process' in symbols:
-        entry = symbols['sdk_master_process']['value']
+        entry = symbols['sdk_cpu_master']['value']
         require(entry in body, 'Master audio entry is not a function start')
         bounds['sdk:master_filter'] = depth(entry)
     return bounds
