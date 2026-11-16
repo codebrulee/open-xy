@@ -168,11 +168,13 @@ Every build measures the DSP board's load during normal playback. Project > M4 >
 cpu shows it, with one setting, `breakdown`: turn the value encoder up for every
 figure on one screen: the load now, its peak, overruns in the last 30 s and since
 power-on, each instrument track's synth voices, tape, FX I, FX II, aux 5 and
-master, and `other`, the load none of those account for.
+master, `other`, the load none of those account for, and `peak from`, what took
+most of the window's slowest block. Averages hide a spike: a track at 19% can
+still be what pushed one block to 91%, and `peak from` names it, or `other`.
 
 Figures are percent of the block period, refreshed about every 0.74 s.
 Extensions get the same figures as the [`cpu_load`](extensions.md#events) event;
-a warning while you play, such as stock's cpu chip naming the heaviest track, is
+a warning while you play, such as stock's cpu chip naming the track behind an overrun, is
 an extension's, through the indicator.
 
 ## Agents and maintainers

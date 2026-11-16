@@ -66,6 +66,43 @@ int main() {
     require(meter::part(parts, 0) == 10 && meter::part(parts, 7) == 5 && meter::part(parts, 12) == 2 &&
             meter::part(parts, 1) == 0, "Part loads");
 
+    // The slowest block keeps its own parts: track 3 spikes in one block while
+    // track 1 is heaviest on average, so the spike names track 3.
+    {
+        static meter::Meter s;
+        u32 at = window(s, 1000, 1000, 300);
+        for (u32 i = 0; i < meter::kWindow; ++i, at += 1000) {
+            const bool spike = i == 7;
+            meter::time_part(s, 0, 200);
+            if (spike) meter::time_part(s, 2, 700);
+            meter::block(s, at, at + (spike ? 950 : 250));
+        }
+        meter::block(s, at, at + 250);  // closes the window
+        u32 average[4], spike[4], peak_parts[meter::kParts];
+        for (u32 i = 0; i < 4; ++i) {
+            average[i] = s.parts[i];
+            spike[i] = s.peak_parts[i];
+        }
+        for (u32 q = 0; q < meter::kParts; ++q) peak_parts[q] = meter::part(spike, q);
+        // The window opened with the last one's closing block, untimed: track 1 is 19.96%.
+        require(meter::part(average, 0) == 19 && meter::part(average, 2) == 0, "Averages hide the spike");
+        require(peak_parts[2] == 70 && peak_parts[0] == 20, "The slowest block's parts");
+        require(meter::decode(s.report).peak == 95, "Its peak");
+        require(meter::peak_from(95, peak_parts) == 2, "The spike names track 3");
+        // A window later, the slowest block's parts are that window's own.
+        at = window(s, at + 1000, 1000, 300);
+        for (u32 i = 0; i < 4; ++i) spike[i] = s.peak_parts[i];
+        require(!spike[0] && !spike[1] && !spike[2] && !spike[3], "Each window starts afresh");
+    }
+    {
+        u32 peak_parts[meter::kParts] = {};
+        peak_parts[4] = 30;
+        require(meter::peak_from(95, peak_parts) == meter::kParts, "Untimed load larger than any part is other");
+        require(meter::peak_from(50, peak_parts) == 4, "A part larger than the untimed load is named");
+        u32 none[meter::kParts] = {};
+        require(meter::peak_from(0, none) == meter::kParts + 1, "Nothing measured names nothing");
+    }
+
     // Fields saturate rather than wrap.
     require(meter::field(1000, 7) == 127 && meter::field(5, 7) == 5, "Saturating fields");
 

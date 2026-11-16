@@ -34,7 +34,8 @@ static_assert(meter::kTracks == opxy::platform::kTracks, "The meter times every 
 // Their first argument picks the answer. Each is an invalid handle, so were the
 // hook ever to miss, stock's own 0x34 (8c0753b4, a filesystem call) would refuse it.
 const u32 kCommand = 0x34, kMagic = 0x5ec5, kNoAction = 0x31;
-const u32 kAskReport = 0xffffffff, kAskRecent = 0xfffffffe, kAskParts = 0xfffffffd;  // parts: 4 words down
+const u32 kAskReport = 0xffffffff, kAskRecent = 0xfffffffe;
+const u32 kAskParts = 0xfffffffd, kAskPeakParts = kAskParts - 4;  // each 4 words down
 const u32 kBridge = 0x11b00530;      // the bridge object, null on the DSP board
 const u32 kBridgeLock = 0x8400fdf0;  // stock's wrappers lock this object around each request
 // A request as 8c0c3c3c builds it: command byte +8, first argument +0xc, result
@@ -55,7 +56,7 @@ static_assert(__builtin_offsetof(Request, command) == 8 && __builtin_offsetof(Re
 meter::Meter dsp;  // DSP board, audio context
 // DSP board: what the GUI's report request saw, so the requests that follow it
 // in one refresh describe the same window.
-u32 snapshot_recent, snapshot_parts[4];
+u32 snapshot_recent, snapshot_parts[4], snapshot_peak_parts[4];
 }
 
 // DSP board, audio: one timed part (cpu_meter_hooks.s, meter::Part).
@@ -76,12 +77,17 @@ u32 sdk_cpu_request(void* raw) {
     const u32 which = request->first;
     if (which == kAskReport) {
         snapshot_recent = dsp.recent;
-        for (u32 i = 0; i < 4; ++i) snapshot_parts[i] = dsp.parts[i];
+        for (u32 i = 0; i < 4; ++i) {
+            snapshot_parts[i] = dsp.parts[i];
+            snapshot_peak_parts[i] = dsp.peak_parts[i];
+        }
         request->result = dsp.report;
     } else if (which == kAskRecent) {
         request->result = snapshot_recent;
     } else if (which <= kAskParts && which > kAskParts - 4) {
         request->result = snapshot_parts[kAskParts - which];
+    } else if (which <= kAskPeakParts && which > kAskPeakParts - 4) {
+        request->result = snapshot_peak_parts[kAskPeakParts - which];
     } else {
         request->result = 0;
     }
@@ -125,6 +131,9 @@ const char* const kStageKeys[meter::kStageRows] = {"tape", "fx I", "fx II", "aux
 const u32 kStageParts[meter::kStageRows] = {meter::kTape, meter::kFx1, meter::kFx2, meter::kAux};
 const char* const kTrackKeys[meter::kTracks] = {"track 1", "track 2", "track 3", "track 4",
                                                 "track 5", "track 6", "track 7", "track 8"};
+// "peak from": what took most of the slowest block (meter::peak_from), by part.
+const char* const kPeakFrom[meter::kParts + 2] = {"track 1", "track 2", "track 3", "track 4", "track 5",
+    "track 6", "track 7", "track 8", "aux 5", "tape", "fx I", "fx II", "master", "other", "-"};
 
 u32 page_table[9], page_thunks[7];
 u32 page_polled, page_last, page_drawn;
@@ -134,6 +143,7 @@ i32 page_selected;
 meter::Settings settings;
 char now_format[16], now_value[16];
 char summary_values[meter::kSummaryRows][16], stage_values[meter::kStageRows][16], track_values[meter::kTracks][16];
+const char* peak_from_value = "-";
 
 const char* page_name(void*) { return "cpu"; }
 void page_input(void* self, u32 type, const i32* event) {
@@ -156,9 +166,12 @@ void refresh() {
     page_polled = 1;
     page_last = now;
     const u32 r = poll(kAskReport), h = poll(kAskRecent);
-    u32 parts[4];
+    u32 parts[4], spike[4], peak_parts[meter::kParts];
     for (u32 i = 0; i < 4; ++i) parts[i] = poll(kAskParts - i);
+    for (u32 i = 0; i < 4; ++i) spike[i] = poll(kAskPeakParts - i);
+    for (u32 p = 0; p < meter::kParts; ++p) peak_parts[p] = meter::part(spike, p);
     if (!(r >> 31)) {
+        peak_from_value = "-";
         put(now_format, "wait");
         put(now_value, "wait");
         for (auto& v : summary_values) put(v, "-");
@@ -180,6 +193,7 @@ void refresh() {
     line(summary_values[5], meter::part(parts, meter::kMaster), "%");
     for (u32 i = 0; i < meter::kStageRows; ++i) line(stage_values[i], meter::part(parts, kStageParts[i]), "%");
     for (u32 t = 0; t < meter::kTracks; ++t) line(track_values[t], meter::part(parts, meter::kTrack1 + t), "%");
+    peak_from_value = kPeakFrom[meter::peak_from(report.peak, peak_parts)];
 }
 
 using String = opxy::platform::registry::StockString;
@@ -259,10 +273,14 @@ namespace opxy { namespace platform { namespace cpu_meter {
 bool sample(Sample& out) {
     const u32 r = poll(kAskReport);
     if (!(r >> 31)) return false;
-    u32 parts[4];
+    u32 parts[4], spike[4];
     for (u32 i = 0; i < 4; ++i) parts[i] = poll(kAskParts - i);
+    for (u32 i = 0; i < 4; ++i) spike[i] = poll(kAskPeakParts - i);
     out.report = decode(r);
-    for (u32 p = 0; p < kParts; ++p) out.parts[p] = part(parts, p);
+    for (u32 p = 0; p < kParts; ++p) {
+        out.parts[p] = part(parts, p);
+        out.peak_parts[p] = part(spike, p);
+    }
     return true;
 }
 // Once the page stops drawing (left, or the prefs screen closed) the breakdown
@@ -278,6 +296,8 @@ u32 breakdown(const char** keys, const char** values) {
     for (u32 i = 0; i < kSummaryRows; ++i) { keys[n] = kSummaryKeys[i]; values[n++] = summary_values[i]; }
     for (u32 i = 0; i < kStageRows; ++i) { keys[n] = kStageKeys[i]; values[n++] = stage_values[i]; }
     for (u32 t = 0; t < kTracks; ++t) { keys[n] = kTrackKeys[t]; values[n++] = track_values[t]; }
+    keys[n] = "peak from";
+    values[n++] = peak_from_value;
     return n;
 }
 }}}
