@@ -49,9 +49,18 @@ extensions::Indicator second_indicator(const extensions::Context&) {
     nested = extensions_indicator();  // reentrant: the last answer, no second poll
     return second_shows;
 }
+// cpu_load: what the first extension last saw, and how often.
+extensions::CpuLoad seen_load = {};
+u32 loads = 0;
+void first_load(const extensions::Context&, const extensions::CpuLoad& load) {
+    seen_load = load;
+    ++loads;
+    extensions_cpu_load(load);  // reentrant: dropped
+}
 const extensions::Hooks first = extensions::Hooks().with_recordable_note_on(first_note)
                                                    .with_queued_control(observe_control)
-                                                   .with_indicator(first_indicator);
+                                                   .with_indicator(first_indicator)
+                                                   .with_cpu_load(first_load);
 const extensions::Hooks second = extensions::Hooks().with_recordable_note_on(second_note)
                                                     .with_queued_control(edit_control)
                                                     .with_indicator(second_indicator);
@@ -192,5 +201,22 @@ int main() {
     CHECK(extensions_indicator() == Indicator::running && nested == Indicator::running);
     first_shows = Indicator::none;
     CHECK(extensions_indicator() == Indicator::armed);
+    // cpu wins over everything, with its label; without one it is ignored.
+    first_shows = Indicator(Indicator::cpu, "FX II"); second_shows = Indicator::running;
+    const Indicator cpu = extensions_indicator();
+    CHECK(cpu == Indicator::cpu && same_text(cpu.label, "FX II"));
+    first_shows = Indicator(Indicator::cpu); second_shows = Indicator::armed;
+    CHECK(extensions_indicator() == Indicator::armed);
+    first_shows = Indicator::running; second_shows = Indicator(Indicator::cpu, "3");
+    CHECK(extensions_indicator() == Indicator::cpu && same_text(extensions_indicator().label, "3"));
+    // cpu_load: offered only when an extension takes it, to every subscriber once.
+    CHECK(extensions_cpu_wanted());
+    extensions::CpuLoad load = {55, 97, 1, {}};
+    load.parts[extensions::cpu::fx2] = 31;
+    extensions_cpu_load(load);
+    CHECK(loads == 1 && seen_load.peak == 97 && seen_load.late == 1 && seen_load.parts[extensions::cpu::fx2] == 31);
+    initialized = false; entries = nullptr;
+    extensions_cpu_load(load);
+    CHECK(loads == 1 && !extensions_cpu_wanted());
     return 0;
 }

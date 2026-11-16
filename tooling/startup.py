@@ -30,7 +30,7 @@ LOCK_CALLS = (('u32', 'size', ('void*', 'u32'), 'return 0;'),
 
 
 def render(prefixes, effects=(), stock_page=(), sample_screens=(), effect_screens=(), player_pages=(),
-           control=False, aux=False, locks=False, drumline=False):
+           control=False, aux=False, locks=False, drumline=False, master=False, drum_sends=False):
     """stock_page: engines that show a stock page (e.g. sample engines on the
     sampler page); they register on the GUI role without an own-page guard.
     sample_screens: those of them that also draw their own screen over it.
@@ -45,7 +45,11 @@ def render(prefixes, effects=(), stock_page=(), sample_screens=(), effect_screen
     stock Drumline's second page). The shared hooks reach it through
     sdk_drumline_get, defined here: without the service it answers null; with it,
     the service's sdk_drumline_service, which the browser builder resolves to
-    kit_absent (null) when the selection leaves the extension out."""
+    kit_absent (null) when the selection leaves the extension out.
+    master: the build links the master processor service, whose processor runs the
+    master stage in place of stock's EQ.
+    drum_sends: the build links the drum send service, whose track hook starts each
+    track's voice loop in place of stock's call (the cpu meter times either)."""
     require(prefixes or effects or player_pages, 'Startup needs at least one machine')
     require(0 <= len(prefixes) <= ENGINE_COUNT and len(set(prefixes)) == len(prefixes),
             'Startup needs distinct engine prefixes')
@@ -112,6 +116,15 @@ def render(prefixes, effects=(), stock_page=(), sample_screens=(), effect_screen
         declarations.append('const void* sdk_drumline_get() { return sdk_drumline_service(); }')
     else:
         declarations.append('const void* sdk_drumline_get() { return nullptr; }')
+    stage = 'sdk_master_stock_stage'
+    if master:
+        declarations.append('void sdk_master_process(void*, i32*, i32*) __asm__("sdk_master_process");')
+        stage = 'sdk_master_process'
+    master_stage = f'void sdk_master_stage(void* object, i32* left, i32* right) {{ {stage}(object, left, right); }}'
+    track = 'sdk_drum_send_track' if drum_sends else 'sdk_track_stock_stage'
+    if drum_sends:
+        declarations.append('u32 sdk_drum_send_track(void*, u32, u32) __asm__("sdk_drum_send_track");')
+    master_stage += f'\nu32 sdk_track_stage(void* pool, u32 track, u32 r2) {{ return {track}(pool, track, r2); }}'
     owned += [f'    if (page == value({prefix}_fx_page_id)) return {prefix}_ready() == 1;' for prefix in effect_screens]
     sample = [f'    if (engine == value({prefix}_engine_id)) return {prefix}_ready() == 1 && {prefix}_screen_ready() == 1 ? value({prefix}_screen_page_id) : 0;'
               for prefix in sample_screens]
@@ -119,7 +132,7 @@ def render(prefixes, effects=(), stock_page=(), sample_screens=(), effect_screen
                   EFFECTS='\n'.join(f'    {prefix}_fx_register();' for prefix in effects),
                   ENGINES='\n'.join(f'    {prefix}_register();' for prefix in prefixes),
                   SCREENS='\n'.join(screens), CATALOG='\n'.join(catalog), ENGINE_SENTINEL=str(ENGINE_SENTINEL),
-                  PROJECT_KEPT=kept,
+                  PROJECT_KEPT=kept, MASTER_STAGE=master_stage,
                   INSTALLED='\n'.join(f'    if ({prefix}_name_matches(name)) return 1;' for prefix in prefixes))
     source = (ROOT / TEMPLATE).read_text(encoding='utf-8')
     for key, text in values.items():
@@ -130,8 +143,8 @@ def render(prefixes, effects=(), stock_page=(), sample_screens=(), effect_screen
 
 
 def generate(directory, prefixes, effects=(), stock_page=(), sample_screens=(), effect_screens=(), player_pages=(),
-             control=False, aux=False, locks=False, drumline=False):
+             control=False, aux=False, locks=False, drumline=False, master=False, drum_sends=False):
     destination = Path(directory) / 'startup.cpp'
     destination.write_text(render(prefixes, effects, stock_page, sample_screens, effect_screens, player_pages,
-                                  control, aux, locks, drumline), encoding='utf-8', newline='\n')
+                                  control, aux, locks, drumline, master, drum_sends), encoding='utf-8', newline='\n')
     return destination

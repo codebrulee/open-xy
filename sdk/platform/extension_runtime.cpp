@@ -397,18 +397,33 @@ bool extensions_scene_select(const extensions::SceneSelect& select) {
 }
 extensions::Indicator extensions_indicator() {
     using extensions::Indicator;
-    static Indicator last = Indicator::none;
-    if (dispatching || !entries) return entries ? last : Indicator::none;
-    Indicator shown = Indicator::none;
+    static Indicator last;
+    if (dispatching || !entries) return entries ? last : Indicator();
+    Indicator shown;
     dispatching = true;
     for (u32 i = 0; i < entry_count; ++i) {
         if (!entries[i].hooks->indicator) continue;
         const Indicator wanted = entries[i].hooks->indicator(current);
-        if (wanted == Indicator::running || (wanted == Indicator::armed && shown == Indicator::none)) shown = wanted;
+        // The strongest wins (cpu, running, armed); a cpu indicator needs its label.
+        if (wanted.kind == Indicator::cpu && !wanted.label) continue;
+        if (wanted.kind > shown.kind && wanted.kind <= Indicator::cpu) shown = wanted;
     }
     dispatching = false;
     last = shown;
     return shown;
+}
+bool extensions_cpu_wanted() {
+    if (!entries) return false;
+    for (u32 i = 0; i < entry_count; ++i)
+        if (entries[i].hooks->cpu_load) return true;
+    return false;
+}
+void extensions_cpu_load(const extensions::CpuLoad& load) {
+    if (dispatching || !entries) return;
+    dispatching = true;
+    for (u32 i = 0; i < entry_count; ++i)
+        if (entries[i].hooks->cpu_load) entries[i].hooks->cpu_load(current, load);
+    dispatching = false;
 }
 bool extensions_punch_in(const extensions::PunchIn& punch) {
     if (dispatching) return false;

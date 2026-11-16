@@ -348,8 +348,9 @@ def events():
 
 
 # Hooks the SDK polls from its own code, not from a firmware site: the overlay
-# asks for the indicator each frame (extension_overlay.cpp).
-POLLED = {'indicator'}
+# asks for the indicator each frame, and gives cpu_load each time it polls the cpu
+# meter (extension_overlay.cpp).
+POLLED = {'indicator', 'cpu_load'}
 
 
 def check_profile(profile):

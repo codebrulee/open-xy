@@ -14,7 +14,7 @@ from tooling import extensions, native, screen, startup_label, stock_tables
 from tooling.adapters import catalog_defaults
 from tooling.firmware import active_services, assemble, hook_instruction, patch_active
 from tooling.machines import number_layout
-from tooling.native import configuration, number_suffixes, package_collection
+from tooling.native import OVERLAY_ARTWORK, ROOT, configuration, number_suffixes, package_collection
 
 
 def check_startup_label(module, symbols, base, expected):

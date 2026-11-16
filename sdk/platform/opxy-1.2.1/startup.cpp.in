@@ -28,6 +28,10 @@ u32 sdk_project_locks_held_value(u32, u32, u32, i32*) __asm__("sdk_project_locks
 u32 sdk_project_locks_held_set(u32, u32, u32, u32, i32) __asm__("sdk_project_locks_held_set");
 void sdk_project_locks_frame() __asm__("sdk_project_locks_frame");
 void sdk_overlay_startup() __asm__("sdk_overlay_startup");
+void sdk_master_stage(void*, i32*, i32*) __asm__("sdk_master_stage");
+void sdk_master_stock_stage(void*, i32*, i32*) __asm__("sdk_master_stock_stage");
+u32 sdk_track_stage(void*, u32, u32) __asm__("sdk_track_stage");
+u32 sdk_track_stock_stage(void*, u32, u32) __asm__("sdk_track_stock_stage");
 u32 sdk_sample_screen(u32) __asm__("sdk_sample_screen");
 int sdk_engine_installed(const void*) __asm__("sdk_engine_installed");
 int sdk_stock_engine_known(const void*) __asm__("sdk_stock_engine_known");
@@ -47,6 +51,10 @@ int kit_absent() { return 0; }
 // Likewise the step-lock handles' calls (open-xy.locks, the held step, the frame): the
 // drum_locks service's, or 0.
 @PROJECT_KEPT@
+
+// The master stage the cpu meter times (cpu_meter_hooks.s): the master processor
+// service's, when this collection links it, otherwise stock's EQ.
+@MASTER_STAGE@
 
 // Effects register on both roles, like stock FX initialisation; engines
 // register here on the audio role only.

@@ -20,9 +20,11 @@ from test_sample_services import HOST_CXX
 ROOT = Path(__file__).resolve().parents[1]
 PLATFORM = ROOT / 'sdk/platform/opxy-1.2.1'
 PROFILE = json.loads((ROOT / 'profiles/opxy-1.2.1.json').read_text(encoding='utf-8'))
-# The six reviewed sites, as drum_send_hooks.s describes them.
-SITES = {'0x8d510bea': ('sdk_drum_send_track', '00e38f5d'),
-         '0x8d51c7b2': ('sdk_drum_send_voice_hook', '0adab01148150000'),
+# The five reviewed sites, as drum_send_hooks.s describes them. The sixth, the
+# track's voice-loop call at 8d510bea, is the cpu meter's: its timed call runs the
+# track hook through startup's sdk_track_stage when the build links drum sends.
+TRACK_CALL = ('0x8d510bea', '00e38f5d')
+SITES = {'0x8d51c7b2': ('sdk_drum_send_voice_hook', '0adab01148150000'),
          '0x8d510ea8': ('sdk_drum_send_gain_hook', '0ada901100360000'),
          '0x8d511088': ('sdk_drum_send_source_1', '09da901100360000'),
          '0x8d5110ca': ('sdk_drum_send_source_2', '09da901100360000'),
@@ -249,16 +251,24 @@ class DrumSend(unittest.TestCase):
         self.assertEqual(native.UNIT_SERVICES['drum_send'], 'drum_sends')
         self.assertEqual(native.UNIT_SERVICES['drum_send_hooks'], 'drum_sends')
 
-    def test_the_profile_reviews_six_call_sites_outside_hardware_loops(self):
+    def test_the_profile_reviews_five_call_sites_outside_hardware_loops(self):
         hooks = {p['address']: p for p in PROFILE['patches'] if p.get('service') == 'drum_sends'}
         self.assertEqual(set(hooks), set(SITES))
+        # The track hook reaches the voice-loop call through the cpu meter's stage.
+        [track] = [p for p in PROFILE['patches'] if p.get('address') == TRACK_CALL[0]]
+        self.assertEqual((track['symbol'], track['before'], track.get('service')), ('sdk_cpu_track', TRACK_CALL[1], None))
+        from tooling import startup
+        self.assertIn('return sdk_drum_send_track(pool, track, r2);', startup.render(['probe'], drum_sends=True))
+        self.assertIn('return sdk_track_stock_stage(pool, track, r2);', startup.render(['probe']))
+        self.assertEqual(native.service_fallbacks({'drum_sends'})['drum_sends'],
+                         {'sdk_drum_send_track': 'sdk_track_stock_stage'})
         for address, (symbol, before) in SITES.items():
             patch = hooks[address]
             self.assertEqual((patch['kind'], patch['symbol'], patch['before'], patch['call']),
                              ('hook', symbol, before, True))
             self.assertEqual(patch['length'], len(before) // 2)
         stubs = (PLATFORM / 'drum_send_hooks.s').read_text(encoding='utf-8')
-        for symbol, _before in SITES.values():
+        for symbol, _before in list(SITES.values()) + [('sdk_drum_send_track', None)]:
             self.assertIn('.global %s' % symbol, stubs)
         # Each stub replays the instruction it replaces: the loop's call, P2's and P1's loads.
         self.assertIn('P0.H = 0x8d51; P0.L = 0xc708;\n    JUMP (P0);', stubs)
@@ -303,7 +313,7 @@ class DrumSend(unittest.TestCase):
         self.assertIn('    HOOK_RESTORE\n    P0 = [SP + 0x48];\n    RTS;', body[:body.index('.size')])
         # The track hook replaces a relative CALL and must jump to its target.
         from tooling.firmware import decode_branch
-        target, call = decode_branch(0x8d510bea, bytes.fromhex(SITES['0x8d510bea'][1]))
+        target, call = decode_branch(0x8d510bea, bytes.fromhex(TRACK_CALL[1]))
         self.assertTrue(call)
         self.assertIn('P0.H = 0x%04x; P0.L = 0x%04x;\n    JUMP (P0);' % (target >> 16, target & 0xffff), stubs)
         # The C++ side reads the same two stock buffers.

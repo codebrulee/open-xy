@@ -930,7 +930,7 @@ bool apply_companion(void* project, const char* path) {
     File* file = file_open(read_companion_path, "rb");
     if (!file) return false;  // no companion: the numbers are read as saved
     u32 bytes = 0, crc = 0, measured_bytes, measured_crc;
-    bool machines_apply=false;
+    bool machines_apply = false;
     const bool applies = read_document(file, bytes, crc, machines_apply);
     file_close(file);
     // Saved since by stock or another tool, for other firmware, or invalid: as saved.

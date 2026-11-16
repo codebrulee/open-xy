@@ -246,7 +246,8 @@ SDK_UNITS = ('divide', 'memory', 'registration', 'registration_stock', 'startup'
              'sample_cache_hooks', 'sample_progress', 'sample_progress_stock', 'pad_assignment',
              'pad_assignment_stock', 'drum_page', 'drum_controls_stock', 'sample_slice_clock', 'drum_display_stock', 'screen_order',
              'screen_hooks', 'synth_controls', 'synth_control_table', 'note_activity', 'project_companion',
-             'project_companion_table', 'profiling', 'lfo', 'lfo_stock', 'lfo_hooks', 'aux5_stage', 'aux5_hooks', 'track5_aux', 'track5_fx', 'track5_fx_table', 'stock_browser',
+             'project_companion_table', 'profiling', 'lfo', 'lfo_stock', 'lfo_hooks', 'aux5_stage', 'aux5_hooks', 'track5_aux', 'track5_fx', 'track5_fx_table',
+             'cpu_meter', 'cpu_meter_hooks', 'cpu_overlay', 'stock_browser',
              'extension_runtime', 'extension_collection', 'extension_stock', 'extension_overlay', 'track_control',
              'track_control_table', 'track_control_hooks', 'track_control_project',
              'synth_pages', 'aux_tracks', 'aux_hooks', 'aux_controller', 'aux_controller_hooks', 'presets', 'overlay', 'overlay_clients',
@@ -422,8 +423,9 @@ def service_fallbacks(services):
     """What a selection that does not use a service gets for the service's entry points
     that shared objects (startup's included) import: kit_absent, which answers 0. Track
     control's saved data, the aux service's start, every call into the step-lock
-    handles (startup.LOCK_CALLS) and stock Drumline's second page (startup's
-    sdk_drumline_get)."""
+    handles (startup.LOCK_CALLS), stock Drumline's second page (startup's
+    sdk_drumline_get), and the cpu meter's master and track stages, which fall back
+    to stock's own."""
     fallbacks = {}
     if 'control' in services:
         fallbacks['control'] = dict.fromkeys(('sdk_control_kept_write', 'sdk_control_kept_load'), 'kit_absent')
@@ -433,6 +435,12 @@ def service_fallbacks(services):
         fallbacks['drum_locks'] = dict.fromkeys(('sdk_step_locks_' + call[1] for call in LOCK_CALLS), 'kit_absent')
     if 'drumline' in services:
         fallbacks['drumline'] = {'sdk_drumline_service': 'kit_absent'}
+    # The cpu meter's timed stages (startup's sdk_master_stage and sdk_track_stage):
+    # stock's EQ and voice loop while a selection has no master processor or drum sends.
+    if 'master_filter' in services:
+        fallbacks['master_filter'] = {'sdk_master_process': 'sdk_master_stock_stage'}
+    if 'drum_sends' in services:
+        fallbacks['drum_sends'] = {'sdk_drum_send_track': 'sdk_track_stock_stage'}
     return fallbacks
 
 
@@ -596,7 +604,9 @@ def compile_collection(directory, toolchain, compiler, profile, machines, defini
                                                 player_pages=[x.prefix for x in by_kind(machines, 'player')],
                                                 control='control' in services, aux='aux' in services,
                                                 locks='drum_locks' in services,
-                                                drumline='drumline' in services)), obj)
+                                                drumline='drumline' in services,
+                                                master='master_filter' in services,
+                                                drum_sends='drum_sends' in services)), obj)
             if (ROOT / TEMPLATES / (step + '.cpp')).is_file():
                 return cxx(TEMPLATES + step + '.cpp', obj)
             return assemble_unit(ROOT / TEMPLATES / (step + '.s'), obj)
@@ -852,8 +862,9 @@ def audio_stack_bounds(disassembly, module, base, symbols, machines, native=None
         entries = [word(symbols[table]['value'] + offset) for offset in slots]
         require(all(entry in body for entry in entries), 'Audio entry of ' + m.id + ' is not a function start')
         bounds[m.id] = max(depth(entry) for entry in entries)
+    # The master processor runs inside the cpu meter's timing of the master stage.
     if 'sdk_master_process' in symbols:
-        entry = symbols['sdk_master_process']['value']
+        entry = symbols['sdk_cpu_master']['value']
         require(entry in body, 'Master audio entry is not a function start')
         bounds['sdk:master_filter'] = depth(entry)
     if 'sdk_drum_send_voice_hook' in symbols:

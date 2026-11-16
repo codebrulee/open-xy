@@ -90,6 +90,9 @@ inline u32 drum_edit_key(u32 track) {
     const u32 held = drum_held_key();
     return held < 128 ? held : drum_selected_key(track);
 }
+// A stock lock object's lock and unlock (the sample manager's, the SPI bridge's).
+inline void lock(u32 object) { stock<void(u32)>(0x8d5be032)(object); }
+inline void unlock(u32 object) { stock<void(u32)>(0x8d5be060)(object); }
 inline void set_text(void* node, const char* text) { stock<void(void*, const char*)>(0x8d6011f0)(node, text); }
 inline void* find_node(void* page, const char* id) { return stock<void*(void*, const char*, u32)>(0x8d520308)(page, id, 1); }
 }}
