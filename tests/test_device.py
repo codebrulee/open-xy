@@ -335,8 +335,14 @@ class DeviceTransferTests(unittest.TestCase):
 
     def test_source_must_be_laid_out_like_the_device(self):
         candidate(self.source, {'manifest.json': b'{}'})
-        with self.assertRaisesRegex(ValueError, 'only os.ldr and content/ at the top\\): manifest.json'):
+        with self.assertRaisesRegex(ValueError, 'build.json at the top\\): manifest.json'):
             transfer.source_files(self.source)
+
+    def test_source_takes_a_builder_download(self):
+        candidate(self.source, {'os.ldr': b'os', 'content/op1_factory.json': b'{}', 'layout.json': b'{}', 'build.json': b'{}'})
+        files, _ = transfer.source_files(self.source)
+        self.assertEqual(files[('layout.json',)], b'{}')
+        self.assertEqual(files[('build.json',)], b'{}')
 
     def test_only_symlinks_and_junctions_count_as_links(self):
         path = self.source / 'os.ldr'

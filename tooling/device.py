@@ -4,7 +4,8 @@
     python sdk.py device list [content/display]
     python sdk.py device pull content/op1_factory.json --out <file>
 
-`push` mirrors a folder holding only os.ldr and content/ onto the device root:
+`push` mirrors a folder holding only os.ldr, content/ and the builder's layout.json
+and build.json onto the device root:
 <folder>/os.ldr goes to /os.ldr,
 <folder>/content/... to /content/..., creating missing folders. Before writing
 it backs up every file it will replace, then writes only changed files, reads
@@ -34,8 +35,9 @@ from .release import outside_checkouts
 
 # Explorer and Finder leave these beside copied files; they never belong on the device.
 JUNK = {'thumbs.db', 'desktop.ini', '.ds_store'}
-# What a build or kit installs; anything else at the top is the wrong folder.
-TOP = {'os.ldr', 'content'}
+# What a build or kit installs: the builder's download also records its layout and
+# build beside them. Anything else at the top is the wrong folder.
+TOP = {'os.ldr', 'content', 'layout.json', 'build.json'}
 IO_REPARSE_TAG_MOUNT_POINT = 0xA0000003  # A directory junction; cloud and dedup reparse points are ordinary files.
 
 
@@ -64,7 +66,7 @@ def source_files(folder):
     require(folder.is_dir(), f'Not a folder: {folder}')
     require(not (folder / 'candidate').is_dir(), f'{folder} holds a build; push its candidate folder: {folder / "candidate"}')
     unexpected = sorted(x.name for x in folder.iterdir() if x.name.lower() not in TOP and not junk(x.name))
-    require(not unexpected, f'{folder} is not laid out like the device (only os.ldr and content/ at the top): '
+    require(not unexpected, f'{folder} is not laid out like the device (only os.ldr, content/, layout.json and build.json at the top): '
             + ', '.join(unexpected))
     files, skipped = {}, []
     for directory, folders, names in os.walk(folder, onerror=unreadable):  # Never push part of a source.
