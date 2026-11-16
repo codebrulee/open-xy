@@ -10,7 +10,7 @@ import zipfile
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 from tooling.formats import elf32, ldr, mapped_offset, require, sha
-from tooling import extensions, screen, startup_label, stock_tables
+from tooling import extensions, native, screen, startup_label, stock_tables
 from tooling.adapters import catalog_defaults
 from tooling.firmware import active_services, assemble, hook_instruction, patch_active
 from tooling.machines import number_layout
@@ -82,7 +82,9 @@ def selection_services(kit, result):
                            # kit.json names it master_processor; older kits, master_filter (core.mjs processorOf).
                            (['master_filter'] if any((e.get('master_processor') or e.get('master_filter')) and
                                                      e['id'] in result['extensions']
-                                                     for e in kit.get('extensions', [])) else []))
+                                                     for e in kit.get('extensions', [])) else []) +
+                           # Drumline's page 2 links Drumline's services (core.mjs linkKit).
+                           (['drumline_page'] if any(e.get('drumline_page') for e in chosen) else []))
 
 
 def selection_settings(kit, result):
@@ -254,6 +256,10 @@ def main():
         actual_catalog = (prefix / 'content/op1_factory.json').read_bytes()
         require(json.loads(actual_catalog) == catalog, 'Browser catalog differs')
         expected_files = {'os.ldr': expected, 'content/op1_factory.json': actual_catalog}
+        # The SDK's overlay artwork (FX III's page), installed with every build.
+        overlay = (ROOT / native.OVERLAY_ARTWORK).read_bytes()
+        require((prefix / 'content/display/openxy_overlay.svg').read_bytes() == overlay, 'Overlay artwork differs')
+        expected_files['content/display/openxy_overlay.svg'] = overlay
         for machine in selected:
             if not machine['catalog']:
                 # An aux machine's presets are the files the kit generated (tooling.adapters.aux_preset_files).
