@@ -40,15 +40,18 @@ inline char* digits(char* p, u32 n) {
 // - report: the window's load (7 bits), slowest block (9), late blocks (6), and
 //   late blocks since power-on (9);
 // - recent: over the last kHistory reports, the slowest block (9) and late blocks (10);
-// - parts[4]: each part's load, 8 bits each, four a word.
+// - parts[4]: each part's load, 8 bits each, four a word;
+// - peak_parts[4]: as parts, each part's share of the window's slowest block, in
+//   percent of a period, so the spike, not the average, names what caused it.
 // Each field saturates. Zero-initialised, as the stock loader runs no constructors.
 struct Meter {
     u32 start, busy, blocks, peak, late, period, late_total;
     u32 pending[kParts];  // this block's part timings
     u32 cycles[kParts];   // the window's
+    u32 slowest[kParts];  // the window's slowest block's
     unsigned short history_peak[kHistory], history_late[kHistory];
     u32 history_next;
-    volatile u32 report, recent, parts[4];
+    volatile u32 report, recent, parts[4], peak_parts[4];
 };
 
 inline void time_part(Meter& m, u32 part, u32 cycles) {
@@ -71,12 +74,16 @@ inline void close(Meter& m, u32 start) {
         late += m.history_late[i];
     }
     m.recent = 1u << 31 | field(worst, 9) | field(late, 10) << 9;
-    u32 packed[4] = {0, 0, 0, 0};
+    u32 packed[4] = {0, 0, 0, 0}, spike[4] = {0, 0, 0, 0};
     for (u32 p = 0; p < kParts; ++p) {
         packed[p / 4] |= field(percent(m.cycles[p], elapsed), 8) << (8 * (p % 4));
-        m.cycles[p] = 0;
+        spike[p / 4] |= field(percent(m.slowest[p], m.period), 8) << (8 * (p % 4));
+        m.cycles[p] = m.slowest[p] = 0;
     }
-    for (u32 i = 0; i < 4; ++i) m.parts[i] = packed[i];
+    for (u32 i = 0; i < 4; ++i) {
+        m.parts[i] = packed[i];
+        m.peak_parts[i] = spike[i];
+    }
     m.busy = m.peak = m.late = m.blocks = 0;
 }
 
@@ -90,10 +97,12 @@ inline void block(Meter& m, u32 start, u32 end) {
         ++m.late_total;
     }
     m.busy += busy;
-    if (busy > m.peak) m.peak = busy;
+    const bool slowest = busy > m.peak;
+    if (slowest) m.peak = busy;
     ++m.blocks;
     for (u32 p = 0; p < kParts; ++p) {
         m.cycles[p] += m.pending[p];
+        if (slowest) m.slowest[p] = m.pending[p];
         m.pending[p] = 0;
     }
 }
@@ -120,9 +129,10 @@ inline void input(Settings& s, i32& selected, u32 type, i32 delta) {
     }
 }
 
-// The breakdown's rows: "now", six summary rows, the four aux stages, the tracks.
+// The breakdown's rows: "now", six summary rows, the four aux stages, the tracks,
+// and "peak from".
 const u32 kSummaryRows = 6, kStageRows = 4;
-const u32 kBreakdownRows = 1 + kSummaryRows + kStageRows + kTracks;
+const u32 kBreakdownRows = 1 + kSummaryRows + kStageRows + kTracks + 1;
 static_assert(kStageRows + 1 == kParts - kAux, "Every stage but master is a stage row");
 
 // GUI, implemented in cpu_meter.cpp for the overlays (cpu_overlay.cpp, and
@@ -130,7 +140,23 @@ static_assert(kStageRows + 1 == kParts - kAux, "Every stage but master is a stag
 struct Sample {
     Report report;
     u32 parts[kParts];
+    u32 peak_parts[kParts];  // the slowest block's, percent of a period
 };
+// What took most of the slowest block: a part, or kParts for the load no part
+// accounts for (mixing, untimed engines), the first of equals; kParts + 1 when
+// nothing was measured.
+inline u32 peak_from(u32 peak, const u32 (&peak_parts)[kParts]) {
+    u32 best = kParts + 1, most = 0, timed = 0;
+    for (u32 p = 0; p < kParts; ++p) {
+        timed += peak_parts[p];
+        if (peak_parts[p] > most) {
+            most = peak_parts[p];
+            best = p;
+        }
+    }
+    if (peak > timed && peak - timed > most) best = kParts;
+    return best;
+}
 bool sample(Sample& out);  // polls the DSP board; false before its first window
 bool breakdown_open();  // the cpu page is drawn with its breakdown open
 // Fills kBreakdownRows keys and values; returns how many.

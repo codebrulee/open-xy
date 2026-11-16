@@ -211,10 +211,12 @@ int main() {
     CHECK(extensions_indicator() == Indicator::cpu && same_text(extensions_indicator().label, "3"));
     // cpu_load: offered only when an extension takes it, to every subscriber once.
     CHECK(extensions_cpu_wanted());
-    extensions::CpuLoad load = {55, 97, 1, {}};
+    extensions::CpuLoad load = {55, 97, 1, {}, {}};
     load.parts[extensions::cpu::fx2] = 31;
+    load.peak_parts[2] = 64;
     extensions_cpu_load(load);
-    CHECK(loads == 1 && seen_load.peak == 97 && seen_load.late == 1 && seen_load.parts[extensions::cpu::fx2] == 31);
+    CHECK(loads == 1 && seen_load.peak == 97 && seen_load.late == 1 && seen_load.parts[extensions::cpu::fx2] == 31 &&
+          seen_load.peak_parts[2] == 64);
     initialized = false; entries = nullptr;
     extensions_cpu_load(load);
     CHECK(loads == 1 && !extensions_cpu_wanted());

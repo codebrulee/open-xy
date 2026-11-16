@@ -43,6 +43,8 @@
     <text id="bd_v17" transform="matrix(1 0 0 1 390 132)" fill="#CDCDCD" font-family="UniversNextPro-Light" font-size="12px">-</text>
     <text id="bd_k18" transform="matrix(1 0 0 1 264 150)" fill="#969696" font-family="UniversNextPro-Light" font-size="12px">-</text>
     <text id="bd_v18" transform="matrix(1 0 0 1 390 150)" fill="#CDCDCD" font-family="UniversNextPro-Light" font-size="12px">-</text>
+    <text id="bd_k19" transform="matrix(1 0 0 1 264 168)" fill="#969696" font-family="UniversNextPro-Light" font-size="12px">-</text>
+    <text id="bd_v19" transform="matrix(1 0 0 1 390 168)" fill="#CDCDCD" font-family="UniversNextPro-Light" font-size="12px">-</text>
   </g>
   <g id="cpu_badge">
     <!-- An extension's cpu indicator: stock's cpu chip (Project's own, redrawn) where

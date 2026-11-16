@@ -271,6 +271,7 @@ struct CpuLoad {
     u32 peak;  // its slowest block; past 100 the block overran
     u32 late;  // blocks that overran their period (dropping audio), at most 63
     u8 parts[cpu::parts];  // each part's average: tracks 1-8, aux 5, tape, FX I, FX II, master
+    u8 peak_parts[cpu::parts];  // each part's share of the slowest block, percent of a period
 };
 using OnCpuLoad = void (*)(const Context&, const CpuLoad&);
 

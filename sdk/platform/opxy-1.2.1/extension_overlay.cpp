@@ -79,9 +79,11 @@ void poll_load() {
     state.load_at = time;
     meter::Sample sample;
     if (!meter::sample(sample)) return;
-    opxy::extensions::CpuLoad load = {sample.report.now, sample.report.peak, sample.report.late, {}};
-    for (u32 p = 0; p < meter::kParts; ++p)
+    opxy::extensions::CpuLoad load = {sample.report.now, sample.report.peak, sample.report.late, {}, {}};
+    for (u32 p = 0; p < meter::kParts; ++p) {
         load.parts[p] = static_cast<opxy::u8>(sample.parts[p] > 255 ? 255 : sample.parts[p]);
+        load.peak_parts[p] = static_cast<opxy::u8>(sample.peak_parts[p] > 255 ? 255 : sample.peak_parts[p]);
+    }
     opxy::platform::extensions_cpu_load(load);
 }
 
