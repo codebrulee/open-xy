@@ -165,19 +165,15 @@ and normal playback separately. A successful benchmark is not full hardware acce
 ## Load while you play
 
 Every build measures the DSP board's load during normal playback. Project > M4 >
-cpu shows it, with two settings:
-
-- `indicator`: off until you turn it on for a project, which saves it in the
-  project's [companion](projects.md#open-xycpu). While on, when a window's slowest
-  block reaches 90% of the block budget, or a block overruns it (an audible click),
-  `cpu N%` shows in red in the bottom-right corner of every screen for about 3 s,
-  with a red dot for an overrun.
-- `breakdown`: turn the value encoder up for every figure on one screen: the
-  load now, its peak, overruns in the last 30 s and since power-on, each
-  instrument track's synth voices, tape, FX I, FX II, aux 5 and master, and
-  `other`, the load none of those account for.
+cpu shows it, with one setting, `breakdown`: turn the value encoder up for every
+figure on one screen: the load now, its peak, overruns in the last 30 s and since
+power-on, each instrument track's synth voices, tape, FX I, FX II, aux 5 and
+master, and `other`, the load none of those account for.
 
 Figures are percent of the block period, refreshed about every 0.74 s.
+Extensions get the same figures as the [`cpu_load`](extensions.md#events) event;
+a warning while you play, such as stock's cpu chip naming the heaviest track, is
+an extension's, through the indicator.
 
 ## Agents and maintainers
 

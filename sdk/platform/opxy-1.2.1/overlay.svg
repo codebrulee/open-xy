@@ -44,10 +44,14 @@
     <text id="bd_k18" transform="matrix(1 0 0 1 264 150)" fill="#969696" font-family="UniversNextPro-Light" font-size="12px">-</text>
     <text id="bd_v18" transform="matrix(1 0 0 1 390 150)" fill="#CDCDCD" font-family="UniversNextPro-Light" font-size="12px">-</text>
   </g>
-  <g id="indicator">
-    <path fill="#000000" d="M402,204h76v14h-76z"/>
-    <path id="ind_alert" fill="#F91400" d="M414,211c0,2.2-1.8,4-4,4s-4-1.8-4-4s1.8-4,4-4S414,208.8,414,211z"/>
-    <text id="ind_cpu" transform="matrix(1 0 0 1 420 215.5)" fill="#F91400" font-family="UniversNextPro-Light" font-size="12px">cpu</text>
+  <g id="cpu_badge">
+    <!-- An extension's cpu indicator: stock's cpu chip (Project's own, redrawn) where
+         stock shows a muted track's M, x 425-453, y 27-55, which it covers, and the
+         label to its left on its own black, moved to fit the label's width. -->
+    <path fill="#000000" d="M423,25h34v34h-34z"/>
+    <path id="cpu_back" fill="#000000" d="M377,35h46v20h-46z"/>
+    <path fill="#F91400" d="M429.5,31h20c0.3,0,0.5,0.2,0.5,0.5v20c0,0.3-0.2,0.5-0.5,0.5h-20c-0.3,0-0.5-0.2-0.5-0.5v-20c0-0.3,0.2-0.5,0.5-0.5zM432.60,26.2h2v3.3h-2zM432.60,53.6h2v3.3h-2zM424.1,34.60h3.3v2h-3.3zM451.6,34.60h3.3v2h-3.3zM436.64,26.2h2v3.3h-2zM436.64,53.6h2v3.3h-2zM424.1,38.64h3.3v2h-3.3zM451.6,38.64h3.3v2h-3.3zM440.68,26.2h2v3.3h-2zM440.68,53.6h2v3.3h-2zM424.1,42.68h3.3v2h-3.3zM451.6,42.68h3.3v2h-3.3zM444.72,26.2h2v3.3h-2zM444.72,53.6h2v3.3h-2zM424.1,46.72h3.3v2h-3.3zM451.6,46.72h3.3v2h-3.3z"/>
+    <text id="cpu_label" transform="matrix(1 0 0 1 400 47.5)" fill="#F91400" font-family="UniversNextPro-Light" font-size="16px">FX II</text>
   </g>
   <g id="recorder">
     <path fill="#000000" d="M416,4h60v26h-60z"/>

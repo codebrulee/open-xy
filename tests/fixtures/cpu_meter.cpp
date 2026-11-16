@@ -1,10 +1,9 @@
 // The cpu meter's arithmetic (cpu_meter.hpp) on synthetic block timings: window
-// load and peak, late blocks, the 30 s history, part loads, the indicator's
-// trigger and the cpu page's settings. Bridge polling, the renderer hooks and the
+// load and peak, late blocks, the 30 s history, part loads and the cpu page's
+// setting. Bridge polling, the renderer hooks and the
 // overlay's drawing need the device.
 #include <cstdio>
 #include <cstdlib>
-#include <cstring>
 #include <cpu_meter.hpp>
 
 namespace {
@@ -70,50 +69,23 @@ int main() {
     // Fields saturate rather than wrap.
     require(meter::field(1000, 7) == 127 && meter::field(5, 7) == 5, "Saturating fields");
 
-    // The indicator: a pushed or late window shows its peak for the hold, a quiet one
-    // counts it down, and no report (or the indicator off) hides it at once.
-    const u32 pushed = 1u << 31 | 40 | 95u << 7, quiet = 1u << 31 | 40 | 60u << 7, late = 1u << 31 | 40 | 70u << 7 | 1u << 16;
-    meter::Alert a = {};
-    meter::update(a, quiet, 3);
-    require(!a.held, "A quiet window shows nothing");
-    meter::update(a, pushed, 3);
-    require(a.held == 3 && !a.late && !std::strcmp(a.text, "cpu 95%"), "A pushed window shows its peak");
-    meter::update(a, quiet, 3);
-    meter::update(a, quiet, 3);
-    require(a.held == 1, "Quiet windows count the hold down");
-    meter::update(a, late, 3);
-    require(a.held == 3 && a.late && !std::strcmp(a.text, "cpu 70%"), "A late block shows even below the threshold");
-    meter::update(a, pushed, 3);
-    require(a.late, "The dot stays while the indicator is held");
-    meter::update(a, 0, 3);
-    require(!a.held, "No report hides it at once");
-    meter::update(a, pushed, 3);
-    require(!a.late, "A fresh showing starts without the dot");
-
-    // Project > M4 > cpu: the highlight stays on the two settings, moving it closes
-    // the breakdown, and the value encoder changes only the highlighted one.
+    // Project > M4 > cpu: one setting under the header, the breakdown. The value
+    // encoders open and close it, and moving the highlight closes it.
     static meter::Settings s;
-    require(!s.indicator && !s.breakdown, "Both start off");
+    require(!s.breakdown, "It starts closed");
     i32 selected = 0;
     meter::input(s, selected, 1, -1);
-    require(selected == meter::kIndicatorRow, "The header is not selectable");
+    require(selected == meter::kBreakdownRow, "The header is not selectable");
     meter::input(s, selected, 3, 1);
-    require(s.indicator, "The value encoder turns the indicator on");
-    meter::input(s, selected, 2, -1);
-    require(!s.indicator, "and off");
-    meter::input(s, selected, 2, 1);
-    meter::input(s, selected, 1, 5);
-    require(selected == meter::kBreakdownRow, "The highlight stops at the last setting");
-    meter::input(s, selected, 2, 1);
-    require(s.breakdown && s.indicator, "The value encoder opens the breakdown, nothing else");
+    require(s.breakdown, "The value encoder opens the breakdown");
     meter::input(s, selected, 2, 0);
     require(s.breakdown, "A zero turn changes nothing");
     meter::input(s, selected, 2, -1);
     require(!s.breakdown, "Turning back closes it");
     meter::input(s, selected, 2, 1);
-    meter::input(s, selected, 1, -1);
-    require(!s.breakdown && selected == meter::kIndicatorRow, "Moving the highlight closes it");
+    meter::input(s, selected, 1, 5);
+    require(!s.breakdown && selected == meter::kBreakdownRow, "Moving the highlight closes it and stays on it");
     meter::input(s, selected, 4, 1);
-    require(!s.breakdown && s.indicator, "Other input changes nothing");
+    require(!s.breakdown, "Other input changes nothing");
     return 0;
 }

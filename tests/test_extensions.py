@@ -130,7 +130,7 @@ class Extensions(unittest.TestCase):
         self.assertEqual(extensions.events(), ['context', 'recordable_note_on', 'selected_note_off',
                                                'recording_tick', 'input_activity', 'queued_control',
                                                'scene_boundary', 'track_mute', 'scene_select', 'indicator',
-                                               'page_left', 'punch_in'])
+                                               'page_left', 'punch_in', 'cpu_load'])
         hook = lambda p: next(x for x in p['patches'] if x.get('events'))
         for mutate in (
             lambda p: hook(p).pop('events'),
@@ -139,6 +139,7 @@ class Extensions(unittest.TestCase):
             lambda p: next(x for x in p['patches'] if not x.get('service')).update(events=['context']),
             lambda p: [x.update(events=['context']) for x in p['patches'] if x.get('events')],
             lambda p: hook(p).update(events=hook(p)['events'] + ['indicator']),  # polled: no site
+            lambda p: hook(p).update(events=hook(p)['events'] + ['cpu_load']),
         ):
             changed = copy.deepcopy(profile)
             mutate(changed)

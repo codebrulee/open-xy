@@ -245,10 +245,34 @@ enum class PunchRecording : u8 { stock, skip };
 using OnPunchIn = PunchRecording (*)(const Context&, const PunchIn&);
 // What the SDK's indicator over every page shows for an extension: nothing,
 // armed (record and pause) or running (record and play), then record and stop
-// for about two seconds once running ends. The strongest any extension asks
-// for is shown, top right.
-enum class Indicator : u8 { none, armed, running };
+// for about two seconds once running ends; or cpu, stock's cpu chip in red with
+// `label` beside it, where stock shows a muted track's M (which it covers). The
+// strongest any extension asks for is shown: cpu, then running, then armed.
+struct Indicator {
+    enum Kind : u8 { none, armed, running, cpu };
+    Kind kind;
+    // cpu: what the chip names, at most 5 characters, in storage that outlives
+    // the call (a string literal); otherwise unused.
+    const char* label;
+    constexpr Indicator(Kind k = none, const char* l = nullptr) : kind(k), label(l) {}
+    constexpr bool operator==(Kind k) const { return kind == k; }
+    constexpr bool operator!=(Kind k) const { return kind != k; }
+};
 using OnIndicator = Indicator (*)(const Context&);
+// The DSP board's load over its latest window of 512 blocks (about 0.74 s), in
+// percent of a block's period: what Project > M4 > cpu shows. Timed parts are
+// each track's synth voices and the mixer's stages; the load none of them
+// accounts for (mixing, untimed engines) is in `load` only.
+namespace cpu {
+enum Part : u32 { track1 = 0, aux5 = 8, tape, fx1, fx2, master, parts };
+}
+struct CpuLoad {
+    u32 load;  // the window's average
+    u32 peak;  // its slowest block; past 100 the block overran
+    u32 late;  // blocks that overran their period (dropping audio), at most 63
+    u8 parts[cpu::parts];  // each part's average: tracks 1-8, aux 5, tape, FX I, FX II, master
+};
+using OnCpuLoad = void (*)(const Context&, const CpuLoad&);
 
 // One callback per event, named for what it delivers. Each event lists its
 // firmware sites in the profile ("events"); docs/extensions.md says how to
@@ -298,51 +322,59 @@ struct Hooks {
     // A punch-in key pressed or released; a transform: a press can be kept out
     // of stock's recorder.
     OnPunchIn punch_in;
+    // The DSP board's load, about twice a second while the collection has a
+    // subscriber (the SDK polls the DSP board only then), with the latest
+    // context; a window can repeat. Observe only.
+    OnCpuLoad cpu_load;
 
     constexpr Hooks() : Hooks(nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr) {}
     // Every callback in order; prefer the with_ builders below.
     constexpr Hooks(OnContext a, OnRecordableNoteOn b, OnSelectedNoteOff c, OnRecordingTick d,
                     OnInputActivity e, OnQueuedControl f, OnSceneBoundary g, OnTrackMute h,
-                    OnSceneSelect i, OnIndicator j = nullptr, OnPageLeft k = nullptr, OnPunchIn l = nullptr)
+                    OnSceneSelect i, OnIndicator j = nullptr, OnPageLeft k = nullptr, OnPunchIn l = nullptr,
+                    OnCpuLoad m = nullptr)
         : context(a), recordable_note_on(b), selected_note_off(c), recording_tick(d),
           input_activity(e), queued_control(f), scene_boundary(g), track_mute(h), scene_select(i), indicator(j),
-          page_left(k), punch_in(l) {}
+          page_left(k), punch_in(l), cpu_load(m) {}
 
     constexpr Hooks with_context(OnContext f) const {
-        return Hooks(f, recordable_note_on, selected_note_off, recording_tick, input_activity, queued_control, scene_boundary, track_mute, scene_select, indicator, page_left, punch_in);
+        return Hooks(f, recordable_note_on, selected_note_off, recording_tick, input_activity, queued_control, scene_boundary, track_mute, scene_select, indicator, page_left, punch_in, cpu_load);
     }
     constexpr Hooks with_recordable_note_on(OnRecordableNoteOn f) const {
-        return Hooks(context, f, selected_note_off, recording_tick, input_activity, queued_control, scene_boundary, track_mute, scene_select, indicator, page_left, punch_in);
+        return Hooks(context, f, selected_note_off, recording_tick, input_activity, queued_control, scene_boundary, track_mute, scene_select, indicator, page_left, punch_in, cpu_load);
     }
     constexpr Hooks with_selected_note_off(OnSelectedNoteOff f) const {
-        return Hooks(context, recordable_note_on, f, recording_tick, input_activity, queued_control, scene_boundary, track_mute, scene_select, indicator, page_left, punch_in);
+        return Hooks(context, recordable_note_on, f, recording_tick, input_activity, queued_control, scene_boundary, track_mute, scene_select, indicator, page_left, punch_in, cpu_load);
     }
     constexpr Hooks with_recording_tick(OnRecordingTick f) const {
-        return Hooks(context, recordable_note_on, selected_note_off, f, input_activity, queued_control, scene_boundary, track_mute, scene_select, indicator, page_left, punch_in);
+        return Hooks(context, recordable_note_on, selected_note_off, f, input_activity, queued_control, scene_boundary, track_mute, scene_select, indicator, page_left, punch_in, cpu_load);
     }
     constexpr Hooks with_input_activity(OnInputActivity f) const {
-        return Hooks(context, recordable_note_on, selected_note_off, recording_tick, f, queued_control, scene_boundary, track_mute, scene_select, indicator, page_left, punch_in);
+        return Hooks(context, recordable_note_on, selected_note_off, recording_tick, f, queued_control, scene_boundary, track_mute, scene_select, indicator, page_left, punch_in, cpu_load);
     }
     constexpr Hooks with_queued_control(OnQueuedControl f) const {
-        return Hooks(context, recordable_note_on, selected_note_off, recording_tick, input_activity, f, scene_boundary, track_mute, scene_select, indicator, page_left, punch_in);
+        return Hooks(context, recordable_note_on, selected_note_off, recording_tick, input_activity, f, scene_boundary, track_mute, scene_select, indicator, page_left, punch_in, cpu_load);
     }
     constexpr Hooks with_scene_boundary(OnSceneBoundary f) const {
-        return Hooks(context, recordable_note_on, selected_note_off, recording_tick, input_activity, queued_control, f, track_mute, scene_select, indicator, page_left, punch_in);
+        return Hooks(context, recordable_note_on, selected_note_off, recording_tick, input_activity, queued_control, f, track_mute, scene_select, indicator, page_left, punch_in, cpu_load);
     }
     constexpr Hooks with_track_mute(OnTrackMute f) const {
-        return Hooks(context, recordable_note_on, selected_note_off, recording_tick, input_activity, queued_control, scene_boundary, f, scene_select, indicator, page_left, punch_in);
+        return Hooks(context, recordable_note_on, selected_note_off, recording_tick, input_activity, queued_control, scene_boundary, f, scene_select, indicator, page_left, punch_in, cpu_load);
     }
     constexpr Hooks with_scene_select(OnSceneSelect f) const {
-        return Hooks(context, recordable_note_on, selected_note_off, recording_tick, input_activity, queued_control, scene_boundary, track_mute, f, indicator, page_left, punch_in);
+        return Hooks(context, recordable_note_on, selected_note_off, recording_tick, input_activity, queued_control, scene_boundary, track_mute, f, indicator, page_left, punch_in, cpu_load);
     }
     constexpr Hooks with_indicator(OnIndicator f) const {
-        return Hooks(context, recordable_note_on, selected_note_off, recording_tick, input_activity, queued_control, scene_boundary, track_mute, scene_select, f, page_left, punch_in);
+        return Hooks(context, recordable_note_on, selected_note_off, recording_tick, input_activity, queued_control, scene_boundary, track_mute, scene_select, f, page_left, punch_in, cpu_load);
     }
     constexpr Hooks with_page_left(OnPageLeft f) const {
-        return Hooks(context, recordable_note_on, selected_note_off, recording_tick, input_activity, queued_control, scene_boundary, track_mute, scene_select, indicator, f, punch_in);
+        return Hooks(context, recordable_note_on, selected_note_off, recording_tick, input_activity, queued_control, scene_boundary, track_mute, scene_select, indicator, f, punch_in, cpu_load);
     }
     constexpr Hooks with_punch_in(OnPunchIn f) const {
-        return Hooks(context, recordable_note_on, selected_note_off, recording_tick, input_activity, queued_control, scene_boundary, track_mute, scene_select, indicator, page_left, f);
+        return Hooks(context, recordable_note_on, selected_note_off, recording_tick, input_activity, queued_control, scene_boundary, track_mute, scene_select, indicator, page_left, f, cpu_load);
+    }
+    constexpr Hooks with_cpu_load(OnCpuLoad f) const {
+        return Hooks(context, recordable_note_on, selected_note_off, recording_tick, input_activity, queued_control, scene_boundary, track_mute, scene_select, indicator, page_left, punch_in, f);
     }
 };
 }}

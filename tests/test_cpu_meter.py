@@ -37,7 +37,7 @@ class CpuMeter(unittest.TestCase):
                              for p in config()['patches']))
 
     @unittest.skipUnless(HOST_CXX, 'No working host C++ compiler (set OPXY_TEST_HOST_CXX)')
-    def test_window_reports_indicator_and_settings(self):
+    def test_window_reports_and_settings(self):
         with tempfile.TemporaryDirectory(prefix='cpu-meter-') as directory:
             binary = Path(directory) / ('test.exe' if os.name == 'nt' else 'test')
             hidden = dict(creationflags=subprocess.CREATE_NO_WINDOW) if os.name == 'nt' else {}
@@ -66,11 +66,23 @@ class CpuMeter(unittest.TestCase):
         source = (ROOT / 'sdk/platform/opxy-1.2.1/cpu_overlay.cpp').read_text(encoding='utf-8')
         rows = len(re.findall(r'"bd_k\d+"', source))
         self.assertEqual(rows, len(re.findall(r'"bd_v\d+"', source)))
-        ids = ['indicator', 'breakdown', 'ind_cpu', 'ind_alert'] + [f'bd_{k}{i}' for k in 'kv' for i in range(rows)]
+        ids = ['breakdown'] + [f'bd_{k}{i}' for k in 'kv' for i in range(rows)]
         self.assertEqual(len(re.findall(r'id="bd_[kv]\d+"', artwork)), 2 * rows)
         for node in ids:
             self.assertIn(f'id="{node}"', artwork)
             self.assertIn(f'"{node}"', source)
+        self.assertNotIn('id="indicator"', artwork, 'warnings are an extension\'s cpu badge')
+
+    def test_the_cpu_badge_takes_the_mute_square(self):
+        artwork = (ROOT / native.OVERLAY_ARTWORK).read_text(encoding='utf-8')
+        source = (ROOT / 'sdk/platform/opxy-1.2.1/extension_overlay.cpp').read_text(encoding='utf-8')
+        for node in ('recorder', 'rec_armed', 'rec_running', 'rec_stopped', 'cpu_badge', 'cpu_label', 'cpu_back'):
+            self.assertIn(f'id="{node}"', artwork)
+            self.assertIn(f'"{node}"', source)
+        badge = artwork[artwork.index('<g id="cpu_badge">'):artwork.index('<g id="recorder">')]
+        # Its black covers stock's M (x 425-453, y 27-55) whole.
+        self.assertIn('d="M423,25h34v34h-34z"', badge)
+        self.assertIn('transform="matrix(1 0 0 1 400 47.5)"', badge, 'extension_overlay.cpp places the label from x 400')
 
     @unittest.skipUnless(os.environ.get('OPXY_TEST_STOCK_OS'), 'Private stock input not supplied')
     def test_sites_hold_the_stock_bytes_they_replace(self):

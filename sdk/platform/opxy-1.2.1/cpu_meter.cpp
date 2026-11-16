@@ -6,8 +6,9 @@
 // - DSP board, audio: cpu_meter_hooks.s times each block's whole DSP callback and
 //   its parts (cpu_meter.hpp keeps the window).
 // - DSP board, bridge: the dispatcher hook answers the GUI's poll.
-// - Main board, GUI: Project > M4 > cpu polls while it is drawn, and the overlay's
-//   indicator (cpu_overlay.cpp) polls about twice a second.
+// - Main board, GUI: Project > M4 > cpu polls while it is drawn, and the
+//   extensions' overlay (extension_overlay.cpp) polls about twice a second while
+//   an extension takes cpu_load.
 #include "benchmark.hpp"
 #include "cpu_meter.hpp"
 #include "registration.hpp"
@@ -18,9 +19,6 @@ void sdk_cpu_block(opxy::u32 start, opxy::u32 end) __asm__("sdk_cpu_block");
 void sdk_cpu_track_time(opxy::u32 part, opxy::u32 cycles) __asm__("sdk_cpu_track_time");
 void sdk_cpu_aux_time(opxy::u32 start, opxy::u32 end) __asm__("sdk_cpu_aux_time");
 opxy::u32 sdk_cpu_request(void* request) __asm__("sdk_cpu_request");
-// The project's indicator setting, for its companion (project_companion.cpp).
-bool sdk_cpu_indicator() __asm__("sdk_cpu_indicator");
-void sdk_cpu_indicator_load(bool on) __asm__("sdk_cpu_indicator_load");
 }
 
 namespace {
@@ -239,10 +237,9 @@ const char* sdk_cpu_page_format() {
     return now_format;
 }
 
-// 8c09a544: after the header row is added (the row vector follows it), the settings.
+// 8c09a544: after the header row is added (the row vector follows it), the setting.
 void sdk_cpu_page_rows(void* header_row) {
     void* rows = static_cast<char*>(header_row) + kStackRowBytes;
-    push_row(rows, "indicator", settings.indicator ? "on" : "off");
     push_row(rows, "breakdown", "open...");  // an action: while open, it covers the page
 }
 
@@ -251,23 +248,23 @@ void sdk_cpu_page_rows(void* header_row) {
 // breakdown shows instead.
 void sdk_cpu_page_tail(void* rows) {
     u32* vector = static_cast<u32*>(rows);
-    const u32 kept = 3 * kListRowBytes;  // the header and the two settings
+    const u32 kept = 2 * kListRowBytes;  // the header and the setting
     for (u32 t = 0; t < meter::kTracks && vector[2] - vector[1] > kept; ++t) {
         vector[2] -= kListRowBytes;
         stock<void(void*)>(0x8c086d28)(reinterpret_cast<void*>(static_cast<opxy::platform::Address>(vector[2])));
     }
 }
 
-// GUI: what a save writes, and what a load gives: on only from a companion that says so.
-bool sdk_cpu_indicator() { return settings.indicator; }
-void sdk_cpu_indicator_load(bool on) { settings.indicator = on; }
-
 namespace opxy { namespace platform { namespace cpu_meter {
-u32 report() {
+bool sample(Sample& out) {
     const u32 r = poll(kAskReport);
-    return r >> 31 ? r : 0;
+    if (!(r >> 31)) return false;
+    u32 parts[4];
+    for (u32 i = 0; i < 4; ++i) parts[i] = poll(kAskParts - i);
+    out.report = decode(r);
+    for (u32 p = 0; p < kParts; ++p) out.parts[p] = part(parts, p);
+    return true;
 }
-bool indicator_enabled() { return settings.indicator; }
 // Once the page stops drawing (left, or the prefs screen closed) the breakdown
 // closes, so it reopens only from the page's own input.
 bool breakdown_open() {

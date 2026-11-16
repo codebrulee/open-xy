@@ -66,6 +66,11 @@ bool extensions_scene_select(const extensions::SceneSelect& select);
 // The strongest indicator any extension asks for now (the overlay polls it each
 // frame), with the latest context; none before the collection has started.
 extensions::Indicator extensions_indicator();
+// Whether any extension takes cpu_load: the overlay polls the DSP board only then.
+bool extensions_cpu_wanted();
+// Every subscriber sees the load, with the latest context (the overlay calls it
+// each time it polls).
+void extensions_cpu_load(const extensions::CpuLoad& load);
 // Every subscriber sees the punch-in; true when one keeps a press out of stock's recorder.
 bool extensions_punch_in(const extensions::PunchIn& punch);
 
@@ -95,7 +100,7 @@ bool extension_hold_song_end();
 bool extension_read_pattern(u32 track, u32 slot, extensions::PatternRead& out);  // an aux track's slot
 bool extension_play_song(bool playing);  // the selected song: 8d58586c + 8d5919bc stopped, 8d5842a0 playing  // until Stop: a song that would stop at its end keeps its last scene  // clear the record arm (+0x305f) and Play's copy of it (+0x3061)
 // The collection was found valid: the adapter starts what it adds beside the
-// events (the indicator's overlay client).
+// events (the indicator's overlay client, which also polls cpu_load).
 void extension_started();
 u32 extension_scene();
 u32 extension_song();

@@ -102,54 +102,21 @@ struct Report { u32 now, peak, late, total; };
 inline Report decode(u32 r) { return {r & 0x7f, r >> 7 & 0x1ff, r >> 16 & 0x3f, r >> 22 & 0x1ff}; }
 inline u32 part(const u32 (&parts)[4], u32 p) { return parts[p / 4] >> (8 * (p % 4)) & 0xff; }
 
-// GUI: the indicator. A report whose slowest block reaches kPushed percent, or
-// that has a late block, shows the peak for `hold` polls; 0 (no report, or the
-// indicator off) hides it at once.
-const u32 kPushed = 90;
-struct Alert {
-    u32 held;
-    bool late;
-    char text[12];  // "cpu N%"
-};
-inline void update(Alert& a, u32 report, u32 hold) {
-    if (!report) {
-        a.held = 0;
-        return;
-    }
-    const Report r = decode(report);
-    if (r.peak < kPushed && !r.late) {
-        if (a.held) --a.held;
-        return;
-    }
-    if (!a.held) a.late = false;
-    a.held = hold;
-    a.late = a.late || r.late;
-    char* p = a.text;
-    for (const char* s = "cpu "; *s; ++s) *p++ = *s;
-    p = digits(p, r.peak);
-    *p++ = '%';
-    *p = 0;
-}
-
-// GUI: Project > M4 > cpu. Under its header readout, two settings: the indicator
-// (on or off) and the breakdown (open or closed). As on voices, input type 1 moves
-// the highlight, which closes the breakdown, and types 2 and 3 change the
-// highlighted setting. Zero-initialised: both off. The indicator's setting is the
-// project's, saved in its companion (docs/projects.md, open-xy.cpu).
-const i32 kIndicatorRow = 0, kBreakdownRow = 1;
+// GUI: Project > M4 > cpu. Under its header readout, one setting: the breakdown
+// (open or closed), which the value encoders (input types 2 and 3) open and
+// close. As on voices, input type 1 moves the highlight, which closes it.
+// Zero-initialised: closed.
+const i32 kBreakdownRow = 0;
 struct Settings {
-    bool indicator;
     bool breakdown;
 };
 inline void input(Settings& s, i32& selected, u32 type, i32 delta) {
     if (!delta) return;
     if (type == 1) {
-        const i32 next = selected + delta;
-        selected = next < kIndicatorRow ? kIndicatorRow : next > kBreakdownRow ? kBreakdownRow : next;
+        selected = kBreakdownRow;
         s.breakdown = false;
     } else if (type == 2 || type == 3) {
-        if (selected == kIndicatorRow) s.indicator = delta > 0;
-        else if (selected == kBreakdownRow) s.breakdown = delta > 0;
+        s.breakdown = delta > 0;
     }
 }
 
@@ -158,9 +125,13 @@ const u32 kSummaryRows = 6, kStageRows = 4;
 const u32 kBreakdownRows = 1 + kSummaryRows + kStageRows + kTracks;
 static_assert(kStageRows + 1 == kParts - kAux, "Every stage but master is a stage row");
 
-// GUI, implemented in cpu_meter.cpp for the overlay (cpu_overlay.cpp).
-u32 report();  // the latest report word, 0 for none
-bool indicator_enabled();
+// GUI, implemented in cpu_meter.cpp for the overlays (cpu_overlay.cpp, and
+// extension_overlay.cpp, which gives extensions cpu_load).
+struct Sample {
+    Report report;
+    u32 parts[kParts];
+};
+bool sample(Sample& out);  // polls the DSP board; false before its first window
 bool breakdown_open();  // the cpu page is drawn with its breakdown open
 // Fills kBreakdownRows keys and values; returns how many.
 u32 breakdown(const char** keys, const char** values);
