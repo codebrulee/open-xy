@@ -26,10 +26,16 @@ def notices(machines, runtime=False):
     texts = ['OP-XY SDK modules\n\n' + read(ROOT / 'LICENSE').decode('utf-8')]
     if runtime:
         texts.append(read(ROOT / 'sdk/platform/blackfin/runtime.LICENSE').decode('utf-8'))
-    for m in machines:
+    for m in [*machines, *native.extensions_of(machines)]:
+        name = m.text['name'] if hasattr(m, 'text') else m.name
+        # Each machine's and extension's own licence (MIT asks for its notice in every
+        # copy): in its folder, or in its repository's root a level or two up.
+        own = next((d / 'LICENSE' for d in (m.root, *list(m.root.parents)[:2]) if (d / 'LICENSE').is_file()), None)
+        if own is not None:
+            texts.append(name + '\n\n' + read(own).decode('utf-8'))
         license_file = child(m.root, 'vendor/LICENSE')
         if license_file.is_file():
-            texts.append(m.name + '\n\n' + read(license_file).decode('utf-8'))
+            texts.append(name + ' (vendored)\n\n' + read(license_file).decode('utf-8'))
     return '\n\n'.join(texts)
 
 
